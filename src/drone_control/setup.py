@@ -15,7 +15,7 @@ setup(
     zip_safe=True,
     maintainer='an',
     maintainer_email='an@todo.todo',
-    description='TODO: Package description',
+    description='Drone control with smooth S-curve servo trajectories',
     license='TODO: License declaration',
     extras_require={
         'test': [

@@ -8,6 +8,7 @@ from mavros_msgs.srv import SetMode, CommandBool, CommandLong
 
 import math
 import time
+from .trajectory import SCurveTrajectory, MultiJointTrajectory
 
 
 class ArmMission(Node):
@@ -43,34 +44,58 @@ class ArmMission(Node):
     PWM_MAX = 1900
     PWM_CENTER = 1500
 
+    # S-curve trajectory parameters for smooth motion
+    MAX_ACCELERATION = 50.0  # PWM units/sec² (adjust based on servo specs)
+    JERK_LIMIT = 100.0        # PWM units/sec³ (limit jerk for smooth motion)
+
     def __init__(self):
         super().__init__('arm_mission')
 
         # ── Parameters ──
         self.declare_parameter('takeoff_alt', 5.0)
         self.declare_parameter('hover_time', 3.0)
+        self.declare_parameter('move_time_sec', 5.0)  # Time for each arm movement
+        self.declare_parameter('hold_time_sec', 1.0)   # Time to hold position after movement
+        self.declare_parameter('max_acceleration', self.MAX_ACCELERATION)
+        self.declare_parameter('jerk_limit', self.JERK_LIMIT)
 
         self.takeoff_alt = self.get_parameter('takeoff_alt').value
         self.hover_time = self.get_parameter('hover_time').value
+        self.move_time_sec = self.get_parameter('move_time_sec').value
+        self.hold_time_sec = self.get_parameter('hold_time_sec').value
+        self.max_acceleration = self.get_parameter('max_acceleration').value
+        self.jerk_limit = self.get_parameter('jerk_limit').value
 
-        # ── Arm sequence definition ──
-        # Each step: (shoulder_pwm, elbow_pwm, hold_seconds)
+        self.get_logger().info(
+            f'Arm mission config: move_time={self.move_time_sec}s, '
+            f'hold_time={self.hold_time_sec}s, '
+            f'accel={self.max_acceleration}, jerk={self.jerk_limit}'
+        )
+
+        # ── Arm sequence definition with S-curve trajectories ──
+        # Each step: (shoulder_pwm, elbow_pwm, move_duration_sec, hold_duration_sec)
+        # Move duration: time for smooth S-curve movement
+        # Hold duration: time to maintain position after reaching target
         # PWM 1100=0°, 1500=90°, 1900=180° for shoulder
         # PWM 1100=-90°, 1500=0°, 1900=+90° for elbow
         self.arm_sequence = [
             # Step 1: shoulder 90°, elbow center
-            (1500, 1500, 3.0),
+            (1500, 1500, self.move_time_sec, self.hold_time_sec),
             # Step 2: shoulder 90°, elbow +45°
-            (1500, 1700, 3.0),
+            (1500, 1700, self.move_time_sec, self.hold_time_sec),
             # Step 3: shoulder 135°, elbow -45°
-            (1700, 1300, 3.0),
+            (1700, 1300, self.move_time_sec, self.hold_time_sec),
             # Step 4: shoulder 45°, elbow center
-            (1300, 1500, 3.0),
+            (1300, 1500, self.move_time_sec, self.hold_time_sec),
             # Step 5: return to home (shoulder 0°, elbow center)
-            (1100, 1500, 3.0),
+            (1100, 1500, self.move_time_sec, self.hold_time_sec),
         ]
         self.arm_step = 0
         self.step_start_time = None
+        self.current_trajectories = None  # Will hold SCurveTrajectory for shoulder and elbow
+        self.step_move_phase = True  # True during movement, False during hold
+        self.shoulder_traj = None
+        self.elbow_traj = None
 
         # ── QoS ──
         qos = QoSProfile(
@@ -264,7 +289,7 @@ class ArmMission(Node):
                 self.mission_state = self.ARM_SEQUENCE
             return
 
-        # --- ARM_SEQUENCE: execute arm steps one by one ---
+        # --- ARM_SEQUENCE: execute arm steps with smooth S-curve trajectories ---
         if s == self.ARM_SEQUENCE:
             if self.arm_step >= len(self.arm_sequence):
                 self.get_logger().info('Arm sequence complete, hovering...')
@@ -272,26 +297,72 @@ class ArmMission(Node):
                 self.mission_state = self.HOVER_AFTER_ARM
                 return
 
-            shoulder_pwm, elbow_pwm, hold_sec = self.arm_sequence[self.arm_step]
+            shoulder_target, elbow_target, move_duration, hold_duration = self.arm_sequence[self.arm_step]
 
             if self.step_start_time is None:
-                # Send servo commands for this step
-                self.send_servo(self.SHOULDER_SERVO, shoulder_pwm)
-                self.send_servo(self.ELBOW_SERVO, elbow_pwm)
-                self.step_start_time = time.time()
-
-                shoulder_deg = (shoulder_pwm - self.PWM_MIN) / (self.PWM_MAX - self.PWM_MIN) * 180.0
-                elbow_deg = ((elbow_pwm - self.PWM_MIN) / (self.PWM_MAX - self.PWM_MIN) - 0.5) * 180.0
+                # Initialize trajectories for this step
                 self.get_logger().info(
                     f'Step {self.arm_step + 1}/{len(self.arm_sequence)}: '
-                    f'shoulder={shoulder_deg:.0f}° (PWM {shoulder_pwm}), '
-                    f'elbow={elbow_deg:.0f}° (PWM {elbow_pwm}), '
-                    f'hold {hold_sec:.1f}s'
+                    f'Moving to shoulder={shoulder_target}PWM, elbow={elbow_target}PWM '
+                    f'over {move_duration}s + hold {hold_duration}s'
                 )
 
-            if time.time() - self.step_start_time >= hold_sec:
-                self.arm_step += 1
-                self.step_start_time = None
+                # Get current positions (or use previous targets as start)
+                if self.arm_step == 0:
+                    shoulder_current = self.PWM_MIN   # Home: 1100 (0°)
+                    elbow_current = self.PWM_CENTER   # Home: 1500 (center)
+                else:
+                    shoulder_current, elbow_current, _, _ = self.arm_sequence[self.arm_step - 1]
+
+                # Create S-curve trajectories for both joints
+                self.shoulder_traj = SCurveTrajectory(
+                    start_pos=shoulder_current,
+                    end_pos=shoulder_target,
+                    duration=move_duration,
+                    max_acceleration=self.max_acceleration,
+                    jerk_limit=self.jerk_limit,
+                )
+                self.elbow_traj = SCurveTrajectory(
+                    start_pos=elbow_current,
+                    end_pos=elbow_target,
+                    duration=move_duration,
+                    max_acceleration=self.max_acceleration,
+                    jerk_limit=self.jerk_limit,
+                )
+
+                self.step_start_time = time.time()
+                self.step_move_phase = True
+
+            elapsed = time.time() - self.step_start_time
+
+            if self.step_move_phase:
+                # Movement phase: interpolate along S-curves
+                if elapsed < self.shoulder_traj.duration:
+                    shoulder_pwm = int(self.shoulder_traj.position(elapsed))
+                    elbow_pwm = int(self.elbow_traj.position(elapsed))
+                    
+                    # Send current servo positions
+                    self.send_servo(self.SHOULDER_SERVO, shoulder_pwm)
+                    self.send_servo(self.ELBOW_SERVO, elbow_pwm)
+                else:
+                    # Movement complete, switch to hold phase
+                    self.shoulder_pwm = shoulder_target
+                    self.elbow_pwm = elbow_target
+                    self.send_servo(self.SHOULDER_SERVO, shoulder_target)
+                    self.send_servo(self.ELBOW_SERVO, elbow_target)
+                    self.step_move_phase = False
+                    self.step_start_time = time.time()  # Reset timer for hold phase
+                    self.get_logger().info(
+                        f'Movement complete. Holding position for {hold_duration}s'
+                    )
+            else:
+                # Hold phase: maintain position
+                if elapsed >= hold_duration:
+                    # Hold phase complete, move to next step
+                    self.arm_step += 1
+                    self.step_start_time = None
+                    self.shoulder_traj = None
+                    self.elbow_traj = None
             return
 
         # --- HOVER_AFTER_ARM: wait before landing ---
