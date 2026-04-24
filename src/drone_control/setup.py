@@ -27,6 +27,7 @@ setup(
             'circle_mission = drone_control.circle_mission:main',
             'takeoff_land_mission = drone_control.takeoff_land_mission:main',
             'arm_mission = drone_control.arm_mission:main',
+            'path_logger = drone_control.path_logger:main',
         ],
     },
 )
