@@ -121,8 +121,7 @@ Clone workspace và import tất cả repos:
 
 ```bash
 # Clone workspace config (setup guide, drone_control, repos file)
-git clone -b feat/arducopter-only-gazebo-sitl \
-  https://github.com/trananh26/AerialVehicleControl.git ~/AerialVehicleControl
+git clone --recursive -b feat/x500-with-arm git@github.com:trananh26/AerialManipulatorControl.git ~/AerialVehicleControl
 
 # Import all source repos (ardupilot, ardupilot_gz, ros_gz, etc.)
 vcs import src < ros2_gz.repos
