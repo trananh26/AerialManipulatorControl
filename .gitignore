@@ -7,6 +7,17 @@ install/
 log/
 logs/
 
+# VS Code IntelliSense DB
+.vscode/browse.vc.db
+.vscode/browse.vc.db-shm
+.vscode/browse.vc.db-wal
+
+# Tools sub-workspace artifacts
+Tools/plot_data/build/
+Tools/plot_data/install/
+Tools/plot_data/log/
+Tools/plot_data/.venv/
+
 # ArduPilot runtime files
 eeprom.bin
 mav.parm
