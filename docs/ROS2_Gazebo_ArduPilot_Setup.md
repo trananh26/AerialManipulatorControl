@@ -121,7 +121,7 @@ Clone workspace và import tất cả repos:
 
 ```bash
 # Clone workspace config (setup guide, drone_control, repos file)
-git clone --recursive -b feat/x500-with-arm git@github.com:trananh26/AerialManipulatorControl.git ~/AerialManipulatorControl
+git clone --recursive -b feat/x500-with-arm https://github.com/trananh26/AerialManipulatorControl.git ~/AerialManipulatorControl
 
 # Import all source repos (ardupilot, ardupilot_gz, ros_gz, etc.)
 vcs import src < ros2_gz.repos
@@ -130,10 +130,10 @@ vcs import src < ros2_gz.repos
 Install ArduPilot prerequisites:
 
 ```bash
-cd ~/AerialVehicleControl/src/ardupilot
+cd ~/AerialManipulatorControl/src/ardupilot
 ./Tools/environment_install/install-prereqs-ubuntu.sh -y
 
-rm -f ~/AerialVehicleControl/src/ardupilot/.lock-waf_linux_build
+rm -f ~/AerialManipulatorControl/src/ardupilot/.lock-waf_linux_build
 
 # Reload environment
 . ~/.profile
@@ -144,7 +144,7 @@ rm -f ~/AerialVehicleControl/src/ardupilot/.lock-waf_linux_build
 Reference: <https://ardupilot.org/dev/docs/ros2.html#ros2>
 
 ```bash
-cd ~/AerialVehicleControl
+cd ~/AerialManipulatorControl
 
 source ~/.bashrc
 source /opt/ros/humble/setup.bash
@@ -158,13 +158,13 @@ colcon build --packages-up-to ardupilot_gz_bringup drone_control
 Source workspace:
 
 ```bash
-source ~/AerialVehicleControl/install/setup.bash
+source ~/AerialManipulatorControl/install/setup.bash
 ```
 
 ## 9. Launch simulation
 
 ```bash
-ros2 launch ardupilot_gz_bringup iris_runway.launch.py
+ros2 launch ardupilot_gz_bringup x500_with_arm_runway.launch.py
 ```
 
 ## 10. Run `drone_control` circle mission
@@ -173,7 +173,7 @@ After the simulator is running, open a new terminal and source the environments:
 
 ```bash
 source /opt/ros/humble/setup.bash
-source ~/AerialVehicleControl/install/setup.bash
+source ~/AerialManipulatorControl/install/setup.bash
 ```
 
 Run the mission node:
@@ -189,4 +189,4 @@ Note:
 
 1. `rosdep init` should be run once per machine.
 2. If `ros2` or `gz` commands are missing in a new terminal, run `source ~/.bashrc`.
-3. The original `GZ_SIM_*` path examples using `~/gz_ws/...` were replaced with `~/AerialVehicleControl/...` to match this workspace.
+3. The original `GZ_SIM_*` path examples using `~/gz_ws/...` were replaced with `~/AerialManipulatorControl/...` to match this workspace.

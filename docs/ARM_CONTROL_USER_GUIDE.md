@@ -99,12 +99,18 @@ Module `path_logger.py` thay thế logic lưu CSV inline trong từng mission no
 | `/mission/save_log` | `std_msgs/String` | Trigger lưu file (data = tên mission) |
 
 ### Cách chạy
+
+```bash
+ros2 launch ardupilot_gz_bringup x500_with_arm_runway.launch.py
+```
+
+
 ```bash
 # Terminal riêng, chạy song song với mission node
 ros2 run drone_control path_logger
 
 # Tùy chỉnh thư mục lưu log (mặc định: <workspace>/logs/trajectory_runs/)
-ros2 run drone_control path_logger --ros-args -p log_dir:=/path/to/logs
+ros2 run drone_control path_logger --ros-args -p log_dir:=/AMLogs
 ```
 
 ### Output
