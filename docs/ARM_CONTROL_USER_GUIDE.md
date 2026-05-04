@@ -58,20 +58,6 @@ self.INIT_ARM_DURATION = 3.0  # seconds
 ### Mô tả
 Thêm parameter `arm_only` cho phép chạy toàn bộ arm sequence mà **không cần arm drone, takeoff, hay land**. Hữu ích khi test arm trên mặt đất.
 
-### Cách dùng
-
-**Chỉ điều khiển arm (không takeoff):**
-```bash
-ros2 run drone_control arm_mission --ros-args -p arm_only:=true
-```
-
-**Chạy mission đầy đủ (arm drone + takeoff + arm sequence + land):**
-```bash
-ros2 run drone_control arm_mission
-# hoặc
-ros2 run drone_control arm_mission --ros-args -p arm_only:=false
-```
-
 ### Flow khi `arm_only:=true`
 ```
 WAIT_CONN → SEND_GUIDED → WAIT_GUIDED
@@ -86,31 +72,38 @@ WAIT_CONN → SEND_GUIDED → WAIT_GUIDED
 
 ---
 
-## 4. Path Logger – Node lưu trajectory
-
-### Mô tả
-Module `path_logger.py` thay thế logic lưu CSV inline trong từng mission node. Nay chạy như một node ROS 2 riêng biệt, lắng nghe topics và lưu dữ liệu khi được trigger.
-
-### Topics
-| Topic | Type | Mô tả |
-|-------|------|--------|
-| `/planned_path` | `nav_msgs/Path` | Path kế hoạch từ mission |
-| `/actual_path` | `nav_msgs/Path` | Path thực tế từ GPS/odometry |
-| `/mission/save_log` | `std_msgs/String` | Trigger lưu file (data = tên mission) |
-
-### Cách chạy
-
+##  4. Cách chạy
+### Mô phỏng
+Terminal 1:
 ```bash
 ros2 launch ardupilot_gz_bringup x500_with_arm_runway.launch.py
 ```
 
-
+Terminal 2:
 ```bash
 # Terminal riêng, chạy song song với mission node
 ros2 run drone_control path_logger
 
+# Hoặc
 # Tùy chỉnh thư mục lưu log (mặc định: <workspace>/logs/trajectory_runs/)
 ros2 run drone_control path_logger --ros-args -p log_dir:=~/AMLogs
+```
+Terminal 3:
+
+**Chỉ điều khiển arm (không takeoff):**
+```bash
+ros2 run drone_control arm_mission --ros-args -p arm_only:=true
+```
+
+**Chạy mission đầy đủ (arm drone + takeoff + arm sequence + land):**
+```bash
+ros2 run drone_control arm_mission
+# hoặc
+ros2 run drone_control arm_mission --ros-args -p arm_only:=false
+```
+**Chạy mission mô phỏng bỏ qua giao diện và set Yaw=0:**
+```bash
+ros2 launch ardupilot_gz_bringup x500_with_arm_runway.launch.py use_gz_sim_gui:=false rviz:=false Y:=0
 ```
 
 ### Output

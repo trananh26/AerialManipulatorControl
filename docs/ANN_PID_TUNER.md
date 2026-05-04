@@ -10,7 +10,7 @@ Module `pid_ann_tuner.py` được tạo để tự động điều chỉnh các
 
 ### 2. Tạo Module Mới: `pid_ann_tuner.py`
 - **Class PIDANNTuner**: Node ROS2 chính để điều chỉnh PID.
-- **Subscribers**: Đăng ký các topic `/mavros/local_position/pose`, `/mavros/local_position/velocity_local`, `/mavros/state` để thu thập dữ liệu vị trí, tốc độ và trạng thái drone.
+- **Subscribers**: Đăng ký các topic `/mavros/local_position/pose`, `/mavros/local_position/velocity_local`, `/mavros/imu/data`, `/mavros/state` để thu thập dữ liệu vị trí, tốc độ, attitude (qua IMU) và trạng thái drone.
 - **Service Client**: Sử dụng `/mavros/param/set` để cập nhật tham số PID trong ArduPilot.
 
 ### 3. Cập Nhật Setup
@@ -28,9 +28,10 @@ Module `pid_ann_tuner.py` được tạo để tự động điều chỉnh các
 - **Loss Function**: Mean Squared Error (MSE)
 
 ### Thuật Toán Học
-- **Reinforcement Learning**: Sử dụng reward dựa trên sự giảm lỗi vị trí (prev_error - curr_error).
+- **Reinforcement Learning**: Sử dụng reward dựa trên sự giảm lỗi vị trí và attitude (prev_error - curr_error).
 - **Online Learning**: Retrain model mỗi 100 samples với dữ liệu thu thập được.
 - **Parameter Update**: Điều chỉnh PID gains với step size nhỏ (0.01 cho P/D, 0.001 cho I) và clamp trong khoảng [0, 2].
+- **Quaternion to Euler**: Chuyển đổi quaternion từ IMU thành góc Euler (roll, pitch, yaw) để tính lỗi attitude.
 
 ## Cách Sử Dụng
 

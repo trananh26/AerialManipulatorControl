@@ -1,12 +1,14 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, TwistStamped
-from mavros_msgs.msg import State, Attitude
+from sensor_msgs.msg import Imu
+from mavros_msgs.msg import State
 from mavros_msgs.srv import ParamSet
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
+import math
 import time
 
 
@@ -24,8 +26,8 @@ class PIDANNTuner(Node):
             PoseStamped, '/mavros/local_position/pose', self.pose_callback, 10)
         self.velocity_sub = self.create_subscription(
             TwistStamped, '/mavros/local_position/velocity_local', self.velocity_callback, 10)
-        self.attitude_sub = self.create_subscription(
-            Attitude, '/mavros/attitude', self.attitude_callback, 10)
+        self.imu_sub = self.create_subscription(
+            Imu, '/mavros/imu/data', self.imu_callback, 10)
         self.state_sub = self.create_subscription(
             State, '/mavros/state', self.state_callback, 10)
 
@@ -86,12 +88,31 @@ class PIDANNTuner(Node):
             msg.twist.linear.z
         ])
 
-    def attitude_callback(self, msg):
-        self.current_attitude = np.array([
-            msg.roll,
-            msg.pitch,
-            msg.yaw
-        ])
+    def imu_callback(self, msg):
+        # Convert quaternion to Euler angles (roll, pitch, yaw)
+        q = msg.orientation
+        self.current_attitude = self.quaternion_to_euler(q.x, q.y, q.z, q.w)
+
+    def quaternion_to_euler(self, x, y, z, w):
+        """Convert quaternion to Euler angles (roll, pitch, yaw)."""
+        # Roll (x-axis rotation)
+        sinr_cosp = 2 * (w * x + y * z)
+        cosr_cosp = 1 - 2 * (x * x + y * y)
+        roll = math.atan2(sinr_cosp, cosr_cosp)
+
+        # Pitch (y-axis rotation)
+        sinp = 2 * (w * y - z * x)
+        if abs(sinp) >= 1:
+            pitch = math.copysign(math.pi / 2, sinp)  # Use 90 degrees if out of range
+        else:
+            pitch = math.asin(sinp)
+
+        # Yaw (z-axis rotation)
+        siny_cosp = 2 * (w * z + x * y)
+        cosy_cosp = 1 - 2 * (y * y + z * z)
+        yaw = math.atan2(siny_cosp, cosy_cosp)
+
+        return np.array([roll, pitch, yaw])
 
     def state_callback(self, msg):
         pass  # Could use for armed state, etc.
