@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 
 from geometry_msgs.msg import TwistStamped, PoseStamped
 from nav_msgs.msg import Path
@@ -114,6 +114,7 @@ class ArmMission(Node):
         # ── QoS ──
         qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
             history=HistoryPolicy.KEEP_LAST,
             depth=10,
         )
@@ -123,6 +124,8 @@ class ArmMission(Node):
             TwistStamped, '/mavros/setpoint_velocity/cmd_vel', qos)
         self.planned_path_pub = self.create_publisher(Path, '/planned_path', 10)
         self.actual_path_pub = self.create_publisher(Path, '/actual_path', 10)
+        self.target_pose_pub = self.create_publisher(PoseStamped, '/mission/target_pose', 10)
+        self.phase_pub = self.create_publisher(String, '/mission/phase', 10)
         self.save_log_pub = self.create_publisher(String, '/mission/save_log', 10)
 
         self.create_subscription(
@@ -163,6 +166,8 @@ class ArmMission(Node):
         self.arm_time = None
         self.hover_start = None
         self.ARM_STABLE_SEC = 5.0
+        self.arm_retry_count = 0
+        self.max_arm_retries = 5
 
         # ── MAVROS services ──
         self.set_mode_client = self.create_client(SetMode, '/mavros/set_mode')
@@ -226,6 +231,24 @@ class ArmMission(Node):
         req.param2 = float(pwm)
         future = self.cmd_client.call_async(req)
         future.add_done_callback(self._servo_done_cb)
+
+    def publish_mission_phase(self, phase):
+        msg = String()
+        msg.data = phase
+        self.phase_pub.publish(msg)
+
+    def publish_target_pose(self, x, y, z, qx, qy, qz, qw):
+        pose = PoseStamped()
+        pose.header.stamp = self.get_clock().now().to_msg()
+        pose.header.frame_id = 'map'
+        pose.pose.position.x = x
+        pose.pose.position.y = y
+        pose.pose.position.z = z
+        pose.pose.orientation.x = qx
+        pose.pose.orientation.y = qy
+        pose.pose.orientation.z = qz
+        pose.pose.orientation.w = qw
+        self.target_pose_pub.publish(pose)
 
     def _servo_done_cb(self, future):
         resp = future.result()
@@ -309,7 +332,8 @@ class ArmMission(Node):
             req = CommandBool.Request()
             req.value = True
             self.pending_future = self.arming_client.call_async(req)
-            self.get_logger().info('Arming...')
+            self.arm_retry_count += 1
+            self.get_logger().info(f'Arming... (attempt {self.arm_retry_count}/{self.max_arm_retries})')
             self.mission_state = self.WAIT_ARM
             return
 
@@ -321,10 +345,23 @@ class ArmMission(Node):
             if resp and resp.success:
                 self.get_logger().info('Arm accepted, waiting for confirmation...')
                 self.arm_time = None
+                self.arm_retry_count = 0
                 self.mission_state = self.WAIT_STABLE
             else:
-                self.get_logger().warn('Arm rejected, retrying...')
-                self.mission_state = self.SEND_ARM
+                if self.arm_retry_count >= self.max_arm_retries:
+                    self.get_logger().error(
+                        f'Arm rejected after {self.max_arm_retries} attempts. '
+                        'Aborting mission. Ensure: drone is level, IMU calibrated, all pre-arm checks pass.'
+                    )
+                    if self.save_log:
+                        self.save_log_pub.publish(String(data='arm_mission_failed'))
+                    self.mission_state = self.DONE
+                else:
+                    self.get_logger().warn(
+                        f'Arm rejected. Pre-arm check failed. Retry in 2s... (attempt {self.arm_retry_count}/{self.max_arm_retries})'
+                    )
+                    time.sleep(2.0)
+                    self.mission_state = self.SEND_ARM
             return
 
         # --- WAIT_STABLE ---
@@ -338,6 +375,8 @@ class ArmMission(Node):
                     self.init_qw = self.current_qw
                     self.add_planned(self.current_x, self.current_y, 0.2,
                                      self.init_qx, self.init_qy, self.init_qz, self.init_qw)
+                    self.publish_target_pose(self.current_x, self.current_y, 0.2,
+                                              self.init_qx, self.init_qy, self.init_qz, self.init_qw)
                 elapsed = (self.get_clock().now() - self.arm_time).nanoseconds / 1e9
                 if elapsed >= self.ARM_STABLE_SEC:
                     self.get_logger().info('Stable, sending takeoff')
@@ -356,6 +395,8 @@ class ArmMission(Node):
             self.get_logger().info(f'Takeoff to {self.takeoff_alt}m...')
             self.add_planned(self.current_x, self.current_y, 0.2,
                              self.init_qx, self.init_qy, self.init_qz, self.init_qw)
+            self.publish_target_pose(self.current_x, self.current_y, self.takeoff_alt,
+                                      self.init_qx, self.init_qy, self.init_qz, self.init_qw)
             self.mission_state = self.WAIT_TAKEOFF
             return
 
@@ -374,6 +415,8 @@ class ArmMission(Node):
                                  self.init_qx, self.init_qy, self.init_qz, self.init_qw)
                 self.add_planned(self.takeoff_x, self.takeoff_y, self.target_z,
                                  self.init_qx, self.init_qy, self.init_qz, self.init_qw)
+                self.publish_target_pose(self.takeoff_x, self.takeoff_y, self.target_z,
+                                          self.init_qx, self.init_qy, self.init_qz, self.init_qw)
                 self.mission_state = self.CLIMBING
             else:
                 self.get_logger().warn('Takeoff rejected, retrying...')
@@ -382,6 +425,8 @@ class ArmMission(Node):
 
         # --- CLIMBING ---
         if s == self.CLIMBING:
+            self.publish_target_pose(self.takeoff_x, self.takeoff_y, self.target_z,
+                                      self.init_qx, self.init_qy, self.init_qz, self.init_qw)
             if self.current_z >= self.target_z - 0.3:
                 self.get_logger().info('Altitude reached, hovering before arm control...')
                 self.add_planned(self.takeoff_x, self.takeoff_y, self.target_z,
@@ -392,6 +437,8 @@ class ArmMission(Node):
 
         # --- HOVER_BEFORE_ARM: stabilize before moving arm ---
         if s == self.HOVER_BEFORE_ARM:
+            self.publish_target_pose(self.takeoff_x, self.takeoff_y, self.target_z,
+                                      self.init_qx, self.init_qy, self.init_qz, self.init_qw)
             if time.time() - self.hover_start >= self.hover_time:
                 self.get_logger().info('Starting arm sequence...')
                 self.arm_step = 0
@@ -401,6 +448,8 @@ class ArmMission(Node):
 
         # --- ARM_SEQUENCE: execute arm steps with smooth S-curve trajectories ---
         if s == self.ARM_SEQUENCE:
+            self.publish_target_pose(self.takeoff_x, self.takeoff_y, self.target_z,
+                                      self.init_qx, self.init_qy, self.init_qz, self.init_qw)
             if self.arm_step >= len(self.arm_sequence):
                 self.get_logger().info('Arm sequence complete.')
                 if self.arm_only:
@@ -484,6 +533,8 @@ class ArmMission(Node):
 
         # --- HOVER_AFTER_ARM: wait before landing ---
         if s == self.HOVER_AFTER_ARM:
+            self.publish_target_pose(self.takeoff_x, self.takeoff_y, self.target_z,
+                                      self.init_qx, self.init_qy, self.init_qz, self.init_qw)
             if time.time() - self.hover_start >= self.hover_time:
                 steps = int(self.target_z / 0.1)
                 for z in [self.target_z - i * 0.1 for i in range(steps)]:
@@ -495,6 +546,9 @@ class ArmMission(Node):
 
         # --- SEND_LAND ---
         if s == self.SEND_LAND:
+            self.publish_mission_phase('LAND')
+            self.publish_target_pose(self.takeoff_x, self.takeoff_y, 0.0,
+                                      self.init_qx, self.init_qy, self.init_qz, self.init_qw)
             req = SetMode.Request()
             req.custom_mode = 'LAND'
             self.pending_future = self.set_mode_client.call_async(req)

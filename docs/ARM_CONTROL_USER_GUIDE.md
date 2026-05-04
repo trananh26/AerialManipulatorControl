@@ -73,6 +73,12 @@ WAIT_CONN → SEND_GUIDED → WAIT_GUIDED
 ---
 
 ##  4. Cách chạy
+
+Source workspace:
+
+```bash
+source ~/AerialManipulatorControl/install/setup.bash
+```
 ### Mô phỏng
 Terminal 1:
 ```bash
