@@ -110,7 +110,7 @@ ros2 launch ardupilot_gz_bringup x500_with_arm_runway.launch.py
 ros2 run drone_control path_logger
 
 # Tùy chỉnh thư mục lưu log (mặc định: <workspace>/logs/trajectory_runs/)
-ros2 run drone_control path_logger --ros-args -p log_dir:=/AMLogs
+ros2 run drone_control path_logger --ros-args -p log_dir:=~/AMLogs
 ```
 
 ### Output

@@ -56,10 +56,10 @@ class ArmMission(Node):
         super().__init__('arm_mission')
 
         # ── Parameters ──
-        self.declare_parameter('takeoff_alt', 5.0)
+        self.declare_parameter('takeoff_alt', 3.0)
         self.declare_parameter('hover_time', 3.0)
-        self.declare_parameter('move_time_sec', 5.0)  # Time for each arm movement
-        self.declare_parameter('hold_time_sec', 1.0)   # Time to hold position after movement
+        self.declare_parameter('move_time_sec', 10.0)  # Time for each arm movement
+        self.declare_parameter('hold_time_sec', 3.0)   # Time to hold position after movement
         self.declare_parameter('max_acceleration', self.MAX_ACCELERATION)
         self.declare_parameter('jerk_limit', self.JERK_LIMIT)
         self.declare_parameter('save_log', True)
@@ -106,7 +106,7 @@ class ArmMission(Node):
         self.elbow_traj = None
 
         # Init positions: Sv9=500 (0°), Sv10=1500 (90°)
-        self.SHOULDER_INIT_PWM = self.PWM_MIN   # 500 = 0°
+        self.SHOULDER_INIT_PWM = self.PWM_CENTER   # 500 = 0°
         self.ELBOW_INIT_PWM = self.PWM_CENTER   # 1500 = 90°
         self.INIT_ARM_DURATION = 3.0            # seconds to reach init position
         self.init_arm_start_time = None
