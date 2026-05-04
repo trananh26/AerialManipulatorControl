@@ -121,8 +121,7 @@ Clone workspace và import tất cả repos:
 
 ```bash
 # Clone workspace config (setup guide, drone_control, repos file)
-git clone -b feat/arducopter-only-gazebo-sitl \
-  https://github.com/trananh26/AerialManipulatorControl.git ~/AerialManipulatorControl
+git clone --recursive -b feat/x500-with-arm https://github.com/trananh26/AerialManipulatorControl.git ~/AerialManipulatorControl
 
 # Import all source repos (ardupilot, ardupilot_gz, ros_gz, etc.)
 vcs import src < ros2_gz.repos
@@ -165,7 +164,7 @@ source ~/AerialManipulatorControl/install/setup.bash
 ## 9. Launch simulation
 
 ```bash
-ros2 launch ardupilot_gz_bringup iris_runway.launch.py
+ros2 launch ardupilot_gz_bringup x500_with_arm_runway.launch.py
 ```
 
 ## 10. Run `drone_control` circle mission

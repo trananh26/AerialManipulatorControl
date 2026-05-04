@@ -15,7 +15,7 @@ setup(
     zip_safe=True,
     maintainer='an',
     maintainer_email='an@todo.todo',
-    description='TODO: Package description',
+    description='Drone control with smooth S-curve servo trajectories',
     license='TODO: License declaration',
     extras_require={
         'test': [
@@ -27,6 +27,7 @@ setup(
             'circle_mission = drone_control.circle_mission:main',
             'takeoff_land_mission = drone_control.takeoff_land_mission:main',
             'arm_mission = drone_control.arm_mission:main',
+            'path_logger = drone_control.path_logger:main',
         ],
     },
 )

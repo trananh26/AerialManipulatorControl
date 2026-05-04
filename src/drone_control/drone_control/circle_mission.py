@@ -6,10 +6,9 @@ from geometry_msgs.msg import TwistStamped, PoseStamped
 from nav_msgs.msg import Path
 from mavros_msgs.msg import State
 from mavros_msgs.srv import SetMode, CommandBool, CommandLong
+from std_msgs.msg import String
 
-import csv
 import math
-import os
 import time
 
 
@@ -50,6 +49,7 @@ class CircleMission(Node):
         self.pub = self.create_publisher(TwistStamped, '/mavros/setpoint_velocity/cmd_vel', qos_profile)
         self.planned_path_pub = self.create_publisher(Path, '/planned_path', 10)
         self.actual_path_pub = self.create_publisher(Path, '/actual_path', 10)
+        self.save_log_pub = self.create_publisher(String, '/mission/save_log', 10)
 
         self.local_pos_sub = self.create_subscription(
             PoseStamped,
@@ -74,7 +74,18 @@ class CircleMission(Node):
         self.current_x = 0.0
         self.current_y = 0.0
         self.current_z = 0.0
+        self.current_qx = 0.0
+        self.current_qy = 0.0
+        self.current_qz = 0.0
+        self.current_qw = 1.0
         self.current_state = None
+        self.takeoff_x = 0.0
+        self.takeoff_y = 0.0
+        # Orientation captured at WAIT_STABLE (spawn orientation)
+        self.init_qx = 0.0
+        self.init_qy = 0.0
+        self.init_qz = 0.0
+        self.init_qw = 1.0
 
         # circle parameters
         self.radius = 5.0
@@ -93,7 +104,7 @@ class CircleMission(Node):
         self.pending_future = None
         self.start_time = None
         self.arm_time = None
-        self.ARM_STABLE_SEC = 2.0   # seconds to wait after arm before takeoff
+        self.ARM_STABLE_SEC = 5.0   # seconds to wait after arm before takeoff
 
         # MAVROS services
         self.set_mode_client = self.create_client(SetMode, '/mavros/set_mode')
@@ -115,6 +126,10 @@ class CircleMission(Node):
         self.current_x = msg.pose.position.x
         self.current_y = msg.pose.position.y
         self.current_z = msg.pose.position.z
+        self.current_qx = msg.pose.orientation.x
+        self.current_qy = msg.pose.orientation.y
+        self.current_qz = msg.pose.orientation.z
+        self.current_qw = msg.pose.orientation.w
         if self.mission_state >= self.CLIMBING and self.mission_state <= self.WAIT_DISARM:
             pose = PoseStamped()
             pose.header = msg.header
@@ -128,46 +143,17 @@ class CircleMission(Node):
         self.current_state = msg
 
 
-    def save_paths_to_csv(self):
-        home = os.path.expanduser('~')
-        ts = time.strftime('%Y%m%d_%H%M%S')
-
-        planned_file = os.path.join(home, f'planned_path_{ts}.csv')
-        with open(planned_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['time_sec', 'time_nsec', 'x', 'y', 'z'])
-            for pose in self.planned_path.poses:
-                writer.writerow([
-                    pose.header.stamp.sec,
-                    pose.header.stamp.nanosec,
-                    pose.pose.position.x,
-                    pose.pose.position.y,
-                    pose.pose.position.z
-                ])
-        self.get_logger().info(f"Planned path saved: {planned_file} ({len(self.planned_path.poses)} points)")
-
-        actual_file = os.path.join(home, f'actual_path_{ts}.csv')
-        with open(actual_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['time_sec', 'time_nsec', 'x', 'y', 'z'])
-            for pose in self.actual_path.poses:
-                writer.writerow([
-                    pose.header.stamp.sec,
-                    pose.header.stamp.nanosec,
-                    pose.pose.position.x,
-                    pose.pose.position.y,
-                    pose.pose.position.z
-                ])
-        self.get_logger().info(f"Actual path saved: {actual_file} ({len(self.actual_path.poses)} points)")
-
-    def add_planned(self, x, y, z):
+    def add_planned(self, x, y, z, qx, qy, qz, qw):
         pose = PoseStamped()
         pose.header.stamp = self.get_clock().now().to_msg()
         pose.header.frame_id = "map"
         pose.pose.position.x = x
         pose.pose.position.y = y
         pose.pose.position.z = z
-        pose.pose.orientation.w = 1.0
+        pose.pose.orientation.x = qx
+        pose.pose.orientation.y = qy
+        pose.pose.orientation.z = qz
+        pose.pose.orientation.w = qw
         self.planned_path.poses.append(pose)
         self.planned_path.header.stamp = pose.header.stamp
         self.planned_path_pub.publish(self.planned_path)
@@ -243,6 +229,12 @@ class CircleMission(Node):
                 if self.arm_time is None:
                     self.arm_time = self.get_clock().now()
                     self.get_logger().info(f"FCU armed confirmed, stabilising for {self.ARM_STABLE_SEC:.1f}s...")
+                    self.init_qx = self.current_qx
+                    self.init_qy = self.current_qy
+                    self.init_qz = self.current_qz
+                    self.init_qw = self.current_qw
+                    self.add_planned(self.current_x, self.current_y, 0.2,
+                                     self.init_qx, self.init_qy, self.init_qz, self.init_qw)
                 elapsed = (self.get_clock().now() - self.arm_time).nanoseconds / 1e9
                 if elapsed >= self.ARM_STABLE_SEC:
                     self.get_logger().info("Stabilisation done, proceeding to takeoff")
@@ -265,9 +257,11 @@ class CircleMission(Node):
             req.param7 = 5.0
             self.pending_future = self.takeoff_client.call_async(req)
             self.get_logger().info("Sending takeoff command...")
+            self.add_planned(self.current_x, self.current_y, 0.2,
+                             self.init_qx, self.init_qy, self.init_qz, self.init_qw)
             self.mission_state = self.WAIT_TAKEOFF
             return
-
+        
         # --- WAIT_TAKEOFF: check response ---
         if self.mission_state == self.WAIT_TAKEOFF:
             if not self.pending_future.done():
@@ -276,8 +270,11 @@ class CircleMission(Node):
             if resp and resp.success:
                 self.takeoff_z = self.current_z
                 self.target_z = self.takeoff_z + 5.0
+                self.takeoff_x = self.current_x
+                self.takeoff_y = self.current_y
                 self.get_logger().info(f"Takeoff accepted, climbing to {self.target_z:.1f}m...")
-                self.add_planned(self.current_x, self.current_y, self.target_z)
+                self.add_planned(self.takeoff_x, self.takeoff_y, self.target_z,
+                                 self.init_qx, self.init_qy, self.init_qz, self.init_qw)
                 self.mission_state = self.CLIMBING
             else:
                 self.get_logger().warn("Takeoff rejected, retrying...")
@@ -287,12 +284,15 @@ class CircleMission(Node):
         # --- CLIMBING: wait until altitude reached ---
         if self.mission_state == self.CLIMBING:
             if self.current_z >= self.target_z:
-                self.x0 = self.current_x
-                self.y0 = self.current_y
+                # Keep planned circle center fixed at takeoff position.
+                self.x0 = self.takeoff_x
+                self.y0 = self.takeoff_y
                 self.get_logger().info(
                     f"Altitude reached, center=({self.x0:.2f}, {self.y0:.2f}), flying to circle start..."
                 )
                 self.mission_state = self.FLY_TO_START
+                self.add_planned(self.current_x, self.current_y, self.target_z,
+                                 self.init_qx, self.init_qy, self.init_qz, self.init_qw)
             return
 
         # --- FLY_TO_START: fly to (x0+R, y0) so takeoff point is circle center ---
@@ -302,11 +302,14 @@ class CircleMission(Node):
             dx = tx - self.current_x
             dy = ty - self.current_y
             dist = math.sqrt(dx * dx + dy * dy)
+            self.add_planned(tx, ty, self.target_z,
+                             self.init_qx, self.init_qy, self.init_qz, self.init_qw)
 
-            if dist < 0.3:
+            if dist < 0.1:
                 self.start_time = time.time()
                 self.get_logger().info("Reached circle start, beginning circle")
-                self.add_planned(tx, ty, self.target_z)
+                self.add_planned(tx, ty, self.target_z,
+                                 self.init_qx, self.init_qy, self.init_qz, self.init_qw)
                 self.mission_state = self.CIRCLE
                 return
 
@@ -331,13 +334,13 @@ class CircleMission(Node):
                 msg.header.frame_id = "map"
                 self.pub.publish(msg)
 
-                # planned landing trajectory
-                steps = int(self.target_z / 0.1)
-                for z in [self.target_z - i * 0.1 for i in range(steps)]:
-                    self.add_planned(self.x0, self.y0, z)
-
+                # # planned landing trajectory
+                # steps = int(self.target_z / 0.1)
+                # for z in [self.target_z - i * 0.1 for i in range(steps)]:
+                #     self.add_planned(self.x0, self.y0, z)
                 self.get_logger().info("Circle completed, flying back to center...")
-                self.add_planned(self.x0, self.y0, self.target_z)
+                self.add_planned(self.x0, self.y0, self.target_z,
+                                 self.init_qx, self.init_qy, self.init_qz, self.init_qw)
                 self.mission_state = self.FLY_TO_CENTER
                 return
 
@@ -350,7 +353,8 @@ class CircleMission(Node):
 
             x = self.x0 + self.radius * math.cos(angle)
             y = self.y0 + self.radius * math.sin(angle)
-            self.add_planned(x, y, self.target_z)
+            self.add_planned(x, y, self.target_z,
+                             self.init_qx, self.init_qy, self.init_qz, self.init_qw)
             return
 
         # --- FLY_TO_CENTER: return to circle center before landing ---
@@ -394,6 +398,10 @@ class CircleMission(Node):
                 return
             resp = self.pending_future.result()
             if resp and resp.mode_sent:
+                self.add_planned(self.current_x, self.current_y, self.target_z,
+                                 self.init_qx, self.init_qy, self.init_qz, self.init_qw)
+                self.add_planned(self.current_x, self.current_y, 0.2,
+                                 self.init_qx, self.init_qy, self.init_qz, self.init_qw)
                 self.get_logger().info("LAND mode accepted, waiting for drone to land...")
                 self.mission_state = self.WAIT_DISARM
             else:
@@ -406,8 +414,7 @@ class CircleMission(Node):
             if self.current_state and not self.current_state.armed:
                 self.get_logger().info("Drone disarmed, landing complete.")
                 if self.save_log:
-                    self.get_logger().info("Saving paths...")
-                    self.save_paths_to_csv()
+                    self.save_log_pub.publish(String(data='circle_mission'))
                 self.mission_state = self.DONE
             return
 
