@@ -28,6 +28,7 @@ setup(
             'takeoff_land_mission = drone_control.takeoff_land_mission:main',
             'arm_mission = drone_control.arm_mission:main',
             'path_logger = drone_control.path_logger:main',
+            'pid_ann_tuner = drone_control.pid_ann_tuner:main',
         ],
     },
 )
