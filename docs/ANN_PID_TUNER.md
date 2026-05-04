@@ -48,11 +48,8 @@ source install/setup.bash
 
 ### Chạy Tuner
 ```bash
-# Chạy tuner trong background
-ros2 run drone_control pid_ann_tuner &
 
-# Chạy mission (ví dụ arm_mission)
-ros2 run drone_control arm_mission
+ros2 run drone_control pid_ann_tuner & ros2 run drone_control arm_mission
 ```
 
 ## Tham Số PID Được Điều Chỉnh
