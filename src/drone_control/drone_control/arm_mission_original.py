@@ -93,6 +93,8 @@ class ArmMission(Node):
             (1500, 2000, self.move_time_sec, self.hold_time_sec),
             # Step 3: shoulder 135°, elbow 45°
             (2000, 1500, self.move_time_sec, self.hold_time_sec),
+            (2000, 1000, self.move_time_sec, self.hold_time_sec),
+            (1500, 1000, self.move_time_sec, self.hold_time_sec),
             # Step 4: shoulder 45°, elbow 90°
             (1500, 1500, self.move_time_sec, self.hold_time_sec),
             # Step 5: shoulder 45°, elbow 90°
