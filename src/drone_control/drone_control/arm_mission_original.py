@@ -87,17 +87,20 @@ class ArmMission(Node):
         # Sv9  (SHOULDER): PWM 500=0°(init), 1500=90°, 2500=180°
         # Sv10 (ELBOW):    PWM 500=0°,       1500=90°(init), 2500=180°
         self.arm_sequence = [
-            # Step 1: shoulder 90°, elbow 90° (init)
+             # Step 1: shoulder 90°, elbow 90° (init)
             (1500, 1500, self.move_time_sec, self.hold_time_sec),
             # Step 2: shoulder 90°, elbow 135°
             (1500, 2000, self.move_time_sec, self.hold_time_sec),
             # Step 3: shoulder 135°, elbow 45°
-            (2000, 1000, self.move_time_sec, self.hold_time_sec),
+            (2000, 1500, self.move_time_sec, self.hold_time_sec),
             # Step 4: shoulder 45°, elbow 90°
+            (1500, 1500, self.move_time_sec, self.hold_time_sec),
+            # Step 5: shoulder 45°, elbow 90°
             (1000, 1500, self.move_time_sec, self.hold_time_sec),
-            # Step 5: return to home (shoulder 0°, elbow 90°)
+            # Step 6: return to home (shoulder 0°, elbow 90°)
             (500, 1500, self.move_time_sec, self.hold_time_sec),
         ]
+        # tay kẹp kẹp vào là 180 = 2500 PWM, mở ra là khoảng 2000 PWM,
         self.arm_step = 0
         self.step_start_time = None
         self.current_trajectories = None  # Will hold SCurveTrajectory for shoulder and elbow
@@ -105,9 +108,9 @@ class ArmMission(Node):
         self.shoulder_traj = None
         self.elbow_traj = None
 
-        # Init positions: Sv9=500 (0°), Sv10=1500 (90°)
-        self.SHOULDER_INIT_PWM = self.PWM_CENTER   # 500 = 0°
-        self.ELBOW_INIT_PWM = self.PWM_CENTER   # 1500 = 90°
+        # Init positions (current setup): Sv9=1500, Sv10=1500
+        self.SHOULDER_INIT_PWM = self.PWM_CENTER
+        self.ELBOW_INIT_PWM = self.PWM_CENTER
         self.INIT_ARM_DURATION = 3.0            # seconds to reach init position
         self.init_arm_start_time = None
 
@@ -426,8 +429,8 @@ class ArmMission(Node):
 
                 # Get current positions (or use previous targets as start)
                 if self.arm_step == 0:
-                    shoulder_current = self.PWM_MIN   # Home: 500 (0°, Sv9 init)
-                    elbow_current = self.PWM_CENTER   # Home: 1500 (90°, Sv10 init)
+                    shoulder_current = self.SHOULDER_INIT_PWM
+                    elbow_current = self.ELBOW_INIT_PWM
                 else:
                     shoulder_current, elbow_current, _, _ = self.arm_sequence[self.arm_step - 1]
 

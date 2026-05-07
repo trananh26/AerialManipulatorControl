@@ -52,6 +52,7 @@ class PIDTuner(Node):
         self.max_samples = 100
         self.target_pose_active = False
         self.in_landing_phase = False
+        self.vehicle_armed = False
 
         # PID parameters to tune (position and attitude control)
         self.pid_params = {
@@ -71,6 +72,7 @@ class PIDTuner(Node):
         self.min_tune_interval = 3.0  # Tăng interval để tuning chậm hơn
         self.last_tune_time = time.time()
         self.min_velocity_for_tuning = 0.6
+        self.min_altitude_for_tuning = 0.5
 
         # Current state
         self.current_pose = None
@@ -112,7 +114,7 @@ class PIDTuner(Node):
         self.target_pose_active = True
 
     def phase_callback(self, msg):
-        if msg.data == 'LAND' or msg.data == 'WAIT_LAND' or msg.data == 'DISARM':
+        if msg.data in {'LAND', 'WAIT_LAND', 'WAIT_DISARM', 'DISARM', 'DONE'}:
             self.in_landing_phase = True
         else:
             self.in_landing_phase = False
@@ -139,7 +141,14 @@ class PIDTuner(Node):
         return np.array([roll, pitch, yaw])
 
     def state_callback(self, msg):
-        pass  # Could use for armed state, etc.
+        self.vehicle_armed = msg.armed
+
+    def is_airborne(self):
+        return (
+            self.vehicle_armed
+            and self.current_pose is not None
+            and self.current_pose[2] >= self.min_altitude_for_tuning
+        )
 
     def calculate_error(self):
         """Calculate position and attitude errors."""
@@ -198,6 +207,9 @@ class PIDTuner(Node):
             return
 
         if self.in_landing_phase:
+            return
+
+        if not self.is_airborne():
             return
 
         pos_error, att_error = self.calculate_error()
