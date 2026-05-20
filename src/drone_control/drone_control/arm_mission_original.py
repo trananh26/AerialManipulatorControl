@@ -58,7 +58,7 @@ class ArmMission(Node):
         # ── Parameters ──
         self.declare_parameter('takeoff_alt', 2.0)
         self.declare_parameter('hover_time', 3.0)
-        self.declare_parameter('move_time_sec', 10.0)  # Time for each arm movement
+        self.declare_parameter('move_time_sec', 6.0)  # Time for each arm movement
         self.declare_parameter('hold_time_sec', 2.0)   # Time to hold position after movement
         self.declare_parameter('max_acceleration', self.MAX_ACCELERATION)
         self.declare_parameter('jerk_limit', self.JERK_LIMIT)
@@ -91,9 +91,11 @@ class ArmMission(Node):
             (1500, 1500, self.move_time_sec, self.hold_time_sec),
             # Step 2: shoulder 90°, elbow 135°
             (1500, 2000, self.move_time_sec, self.hold_time_sec),
+            (1500, 2400, self.move_time_sec, self.hold_time_sec),
             # Step 3: shoulder 135°, elbow 45°
             (2000, 1500, self.move_time_sec, self.hold_time_sec),
-            (2000, 1000, self.move_time_sec, self.hold_time_sec),
+            (2400, 1500, self.move_time_sec, self.hold_time_sec),
+            (2000, 1500, self.move_time_sec, self.hold_time_sec),
             (1500, 1000, self.move_time_sec, self.hold_time_sec),
             # Step 4: shoulder 45°, elbow 90°
             (1500, 1500, self.move_time_sec, self.hold_time_sec),
