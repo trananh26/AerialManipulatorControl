@@ -56,10 +56,10 @@ class ArmMission(Node):
         super().__init__('arm_mission')
 
         # ── Parameters ──
-        self.declare_parameter('takeoff_alt', 2.0)
+        self.declare_parameter('takeoff_alt', 3.0)
         self.declare_parameter('hover_time', 3.0)
         self.declare_parameter('move_time_sec', 6.0)  # Time for each arm movement
-        self.declare_parameter('hold_time_sec', 2.0)   # Time to hold position after movement
+        self.declare_parameter('hold_time_sec', 3.0)   # Time to hold position after movement
         self.declare_parameter('max_acceleration', self.MAX_ACCELERATION)
         self.declare_parameter('jerk_limit', self.JERK_LIMIT)
         self.declare_parameter('save_log', True)
