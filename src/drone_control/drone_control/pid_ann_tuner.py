@@ -52,6 +52,7 @@ class PIDTuner(Node):
         self.max_samples = 100
         self.target_pose_active = False
         self.in_landing_phase = False
+        self.vehicle_armed = False
 
         # PID parameters to tune (position and attitude control)
         self.pid_params = {
@@ -67,10 +68,22 @@ class PIDTuner(Node):
 
         # Tuning configuration
         self.learning_rate = 0.003  # Giảm learning rate để ổn định hơn
-        self.min_error_to_tune = 0.15
-        self.min_tune_interval = 3.0  # Tăng interval để tuning chậm hơn
+        self.min_error_to_tune = 0.08
+        self.min_tune_interval = 5.0
         self.last_tune_time = time.time()
-        self.min_velocity_for_tuning = 0.6
+        self.min_velocity_for_tuning = 0.35
+        self.min_altitude_for_tuning = 0.5
+        self.min_att_error_to_tune = 0.0025
+        self.attitude_small_error = 0.0012
+        self.required_stable_samples = 5
+        self.stable_counter = 0
+        self.error_ema = np.zeros(6)
+        self.error_ema_alpha = 0.2
+        self.max_delta = {
+            'P': 0.004,
+            'I': 0.001,
+            'D': 0.006,
+        }
 
         # Current state
         self.current_pose = None
@@ -112,7 +125,7 @@ class PIDTuner(Node):
         self.target_pose_active = True
 
     def phase_callback(self, msg):
-        if msg.data == 'LAND' or msg.data == 'WAIT_LAND' or msg.data == 'DISARM':
+        if msg.data in {'LAND', 'WAIT_LAND', 'WAIT_DISARM', 'DISARM', 'DONE'}:
             self.in_landing_phase = True
         else:
             self.in_landing_phase = False
@@ -139,7 +152,14 @@ class PIDTuner(Node):
         return np.array([roll, pitch, yaw])
 
     def state_callback(self, msg):
-        pass  # Could use for armed state, etc.
+        self.vehicle_armed = msg.armed
+
+    def is_airborne(self):
+        return (
+            self.vehicle_armed
+            and self.current_pose is not None
+            and self.current_pose[2] >= self.min_altitude_for_tuning
+        )
 
     def calculate_error(self):
         """Calculate position and attitude errors."""
@@ -189,6 +209,13 @@ class PIDTuner(Node):
         values = [e[axis_index] for e in list(self.errors)[-window:]]
         return np.mean(values)
 
+    def clamp_delta(self, key, delta):
+        suffix = key.rsplit('_', 1)[-1]
+        limit = self.max_delta.get(suffix)
+        if limit is None:
+            return delta
+        return float(np.clip(delta, -limit, limit))
+
     def tune_pid(self):
         """Adjust PID parameters conservatively to reduce oscillations."""
         if self.current_pose is None or self.current_velocity is None or self.current_attitude is None:
@@ -198,6 +225,9 @@ class PIDTuner(Node):
             return
 
         if self.in_landing_phase:
+            return
+
+        if not self.is_airborne():
             return
 
         pos_error, att_error = self.calculate_error()
@@ -210,10 +240,16 @@ class PIDTuner(Node):
 
         # Skip tuning while vehicle is actively moving rapidly; wait for disturbance to settle
         if np.linalg.norm(self.current_velocity) > self.min_velocity_for_tuning:
+            self.stable_counter = 0
+            return
+        self.stable_counter += 1
+        if self.stable_counter < self.required_stable_samples:
             return
 
-        pos_error_magnitude = np.linalg.norm(pos_error)
-        att_error_magnitude = np.linalg.norm(att_error)
+        # Smooth errors to avoid aggressive reactions to noise spikes.
+        self.error_ema = self.error_ema_alpha * current_error + (1.0 - self.error_ema_alpha) * self.error_ema
+        filtered_pos_error = self.error_ema[:3]
+        filtered_att_error = self.error_ema[3:]
 
         previous_params = self.pid_params.copy()
         y_axis_osc = self.axis_oscillation(1)
@@ -221,57 +257,69 @@ class PIDTuner(Node):
         y_steady = self.steady_error(1)
 
         # If Y-axis oscillation is detected, damp Y control strongly.
-        if y_axis_osc and abs(pos_error[1]) > self.min_error_to_tune:
-            self.adjust_gain('POS_Y_P', -0.02)
-            self.adjust_gain('POS_Y_D', 0.04)
-            self.adjust_gain('POS_Y_I', -0.005)
+        if y_axis_osc and abs(filtered_pos_error[1]) > self.min_error_to_tune:
+            self.adjust_gain('POS_Y_P', -0.004)
+            self.adjust_gain('POS_Y_D', 0.006)
+            self.adjust_gain('POS_Y_I', -0.0008)
             self.get_logger().info('Y-axis oscillation detected, strongly damping Y gains')
 
         # Fine tune POS Y based only on Y behavior.
-        if abs(pos_error[1]) > self.min_error_to_tune:
-            if y_trend * pos_error[1] > 0:
+        if abs(filtered_pos_error[1]) > self.min_error_to_tune:
+            if y_trend * filtered_pos_error[1] > 0:
                 # Error magnitude is increasing; reduce P and increase D.
-                self.adjust_gain('POS_Y_P', -0.01)
-                self.adjust_gain('POS_Y_D', 0.02)
-                self.adjust_gain('POS_Y_I', -0.002)
-            elif y_trend * pos_error[1] < 0:
+                self.adjust_gain('POS_Y_P', -0.003)
+                self.adjust_gain('POS_Y_D', 0.004)
+                self.adjust_gain('POS_Y_I', -0.0006)
+            elif y_trend * filtered_pos_error[1] < 0:
                 # Error magnitude is decreasing; increase P if not oscillating.
                 if not y_axis_osc:
-                    self.adjust_gain('POS_Y_P', 0.005)
-                    self.adjust_gain('POS_Y_D', -0.003)
+                    self.adjust_gain('POS_Y_P', 0.0015)
+                    self.adjust_gain('POS_Y_D', -0.001)
 
             if abs(y_steady) > 0.12 and not y_axis_osc:
-                self.adjust_gain('POS_Y_I', 0.002)
+                self.adjust_gain('POS_Y_I', 0.0006)
             elif abs(y_steady) < 0.05:
-                self.adjust_gain('POS_Y_I', -0.001)
+                self.adjust_gain('POS_Y_I', -0.0004)
 
-        elif abs(pos_error[1]) < 0.05:
-            # If Y is already stable, reduce gains to avoid overshoot.
-            self.adjust_gain('POS_Y_P', -0.005)
-            self.adjust_gain('POS_Y_D', -0.002)
-            self.adjust_gain('POS_Y_I', -0.001)
+        elif abs(filtered_pos_error[1]) < 0.03:
+            # Keep very small integral bleed when Y is already stable.
+            self.adjust_gain('POS_Y_I', -0.0002)
 
-        # Global oscillation handling for other axes and attitude.
-        if self.has_oscillation() and (pos_error_magnitude > self.min_error_to_tune or att_error_magnitude > self.min_error_to_tune):
-            self.adjust_gain('POS_X_P', -0.01)
-            self.adjust_gain('POS_Z_P', -0.01)
-            self.adjust_gain('ROLL_D', 0.01)
-            self.adjust_gain('PITCH_D', 0.01)
-            self.adjust_gain('YAW_D', 0.01)
+        # Attitude tuning: stabilize roll/pitch with conservative damping.
+        roll_osc = self.axis_oscillation(3)
+        pitch_osc = self.axis_oscillation(4)
+        roll_trend = self.axis_trend(3)
+        pitch_trend = self.axis_trend(4)
+        roll_err = filtered_att_error[0]
+        pitch_err = filtered_att_error[1]
 
-        if not y_axis_osc and abs(pos_error[0]) > self.min_error_to_tune:
-            x_trend = self.axis_trend(0)
-            if x_trend * pos_error[0] > 0:
-                self.adjust_gain('POS_X_P', -0.004)
-            elif x_trend * pos_error[0] < 0:
-                self.adjust_gain('POS_X_P', 0.002)
+        if abs(roll_err) > self.min_att_error_to_tune:
+            if roll_osc:
+                self.adjust_gain('ROLL_P', -0.003)
+                self.adjust_gain('ROLL_D', 0.005)
+                self.adjust_gain('ROLL_I', -0.0005)
+            elif roll_trend * roll_err > 0:
+                self.adjust_gain('ROLL_P', -0.0015)
+                self.adjust_gain('ROLL_D', 0.002)
+            else:
+                self.adjust_gain('ROLL_P', 0.0008)
+                self.adjust_gain('ROLL_D', -0.0006)
+        elif abs(roll_err) < self.attitude_small_error:
+            self.adjust_gain('ROLL_I', -0.0002)
 
-        if not y_axis_osc and abs(pos_error[2]) > self.min_error_to_tune:
-            z_trend = self.axis_trend(2)
-            if z_trend * pos_error[2] > 0:
-                self.adjust_gain('POS_Z_P', -0.004)
-            elif z_trend * pos_error[2] < 0:
-                self.adjust_gain('POS_Z_P', 0.002)
+        if abs(pitch_err) > self.min_att_error_to_tune:
+            if pitch_osc:
+                self.adjust_gain('PITCH_P', -0.003)
+                self.adjust_gain('PITCH_D', 0.005)
+                self.adjust_gain('PITCH_I', -0.0005)
+            elif pitch_trend * pitch_err > 0:
+                self.adjust_gain('PITCH_P', -0.0015)
+                self.adjust_gain('PITCH_D', 0.002)
+            else:
+                self.adjust_gain('PITCH_P', 0.0008)
+                self.adjust_gain('PITCH_D', -0.0006)
+        elif abs(pitch_err) < self.attitude_small_error:
+            self.adjust_gain('PITCH_I', -0.0002)
 
         changed = {k: (previous_params[k], self.pid_params[k])
                    for k in self.pid_params
@@ -281,8 +329,11 @@ class PIDTuner(Node):
         if len(self.errors) > self.max_samples:
             self.errors.pop(0)
 
+        if not changed:
+            return
+
         self.last_tune_time = time.time()
-        self.apply_pid_params()
+        self.apply_pid_params(changed)
 
         if changed:
             change_strings = [f'{k}: {old:.3f}->{new:.3f}' for k, (old, new) in changed.items()]
@@ -299,15 +350,21 @@ class PIDTuner(Node):
                     f'PID: POS_P={self.pid_params["POS_Y_P"]:.3f}, POS_I={self.pid_params["POS_Y_I"]:.3f}, POS_D={self.pid_params["POS_Y_D"]:.3f}')
 
     def adjust_gain(self, key, delta):
+        delta = self.clamp_delta(key, delta)
         self.pid_params[key] = np.clip(self.pid_params[key] + delta, 0.0, 2.0)
 
-    def apply_pid_params(self):
+    def apply_pid_params(self, changed=None):
         """Set PID parameters in ArduPilot via MAVROS."""
         if not self.param_set_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().warning('ParamSet service not available yet')
             return
 
-        for param_name, value in self.pid_params.items():
+        if changed is None:
+            items = self.pid_params.items()
+        else:
+            items = [(param_name, self.pid_params[param_name]) for param_name in changed.keys()]
+
+        for param_name, value in items:
             req = ParamSet.Request()
             req.param_id = param_name
             req.value.real = float(value)
