@@ -49,7 +49,7 @@ source install/setup.bash
 ### Chạy Tuner
 ```bash
 
-ros2 run drone_control pid_ann_tuner & ros2 run drone_control arm_mission
+ros2 run drone_control pid_ann_tuner & ros2 run drone_control arm_mission_ann_pid
 ```
 
 ## Tham Số PID Được Điều Chỉnh
