@@ -214,7 +214,7 @@ x500_with_arm/model.sdf         ← Wrapper: include x500_base + arm
 | Joint | Type | Axis | Range | Damping | Friction |
 |-------|------|------|-------|---------|----------|
 | shoulder_joint | revolute | Y | 0 → 3.14 rad (0°–180°) | 0.1 | 0.05 |
-| elbow_joint | revolute | Y | -1.57 → 1.57 rad (±90°) | 0.1 | 0.05 |
+| elbow_joint | revolute | Y | 0 → π (CAD rest @ π/2 = mission 90°) | 0.1 | 0.05 |
 
 Mesh URIs dùng `package://ardupilot_gazebo/models/arm/` cho RViz compatibility.
 
@@ -232,8 +232,8 @@ MAV_CMD_DO_SET_SERVO (cmd 183)
 
 | Plugin channel | ArduPilot | Param | PWM Range | Góc quay |
 |----------------|-----------|-------|-----------|----------|
-| ch8 | SERVO9 (AUX1) | FUNCTION=0 | 1100–1900 | 0°–180° (shoulder) |
-| ch9 | SERVO10 (AUX2) | FUNCTION=0 | 1100–1900 | -90°–+90° (elbow) |
+| ch8 | SERVO9 (AUX1) | FUNCTION=0 | 500–2500 | shoulder 0…π (init 0°) |
+| ch9 | SERVO10 (AUX2) | FUNCTION=0 | 500–2500 | elbow 0…π (init 90° / π/2) |
 
 ### JointPositionController PID Tuning
 

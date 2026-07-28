@@ -41,9 +41,9 @@ WAIT_CONN → SEND_GUIDED → WAIT_GUIDED
     → SEND_ARM → WAIT_ARM → ...
 ```
 
-### Vị trí init
-- Sv9 (Shoulder): **500 PWM = 0°**
-- Sv10 (Elbow): **1500 PWM = 90°**
+### Vị trí init (canonical — Gazebo rad == mission rad)
+- Sv9 (Shoulder): **500 PWM = 0°** (Gazebo ≈ 0)
+- Sv10 (Elbow): **1500 PWM = 90°** (Gazebo ≈ π/2, pose CAD rest)
 
 ### Tùy chỉnh thời gian chờ
 Sửa `INIT_ARM_DURATION` trong `arm_mission.py` (mặc định 3.0 giây):

@@ -1,70 +1,50 @@
 # Trajectory Plotting Tool
 
-Visualize drone trajectory data from mission runs.
+Visualize drone trajectory and arm joint data from mission runs.
 
 ## Setup
-
-### 1. Create and activate virtual environment
 
 ```bash
 cd ~/ros2_project/AerialManipulatorControl/Tools/plot_data
 python3 -m venv .venv
-source .venv/bin/activate  # On Linux/Mac
-# or on Windows:
-# .venv\Scripts\activate
-```
-
-### 2. Install dependencies
-
-```bash
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
 ## Usage
 
-### Plot the latest mission run
-
 ```bash
 python plot_trajectory.py
-```
-
-This automatically finds the latest run directory in `logs/trajectory_runs/`
-
-### Plot a specific run
-
-```bash
 python plot_trajectory.py /full/path/to/run/directory
-```
-
-Example:
-```bash
-python plot_trajectory.py ~/ros2_project/AerialManipulatorControl/logs/trajectory_runs/arm_mission_20260423_104633
-```
-
-### List available runs
-
-```bash
 python plot_trajectory.py --list
 ```
 
-## Output
+## How storage mirrors drone path
 
-The script generates:
-- **Position vs Time**: X, Y, Z coordinates over mission duration
-- **Euler Angles** (if available): Roll, Pitch, Yaw angles
-- **3D Trajectory**: Side-by-side visualization of planned vs actual path
+| | Drone path | Arm joints |
+|--|------------|------------|
+| Actual stamp | `/mavros/.../pose` header | `/x500/joint_states` header |
+| Planned stamp | mission clock (ideally same domain) | **same as last joint_states stamp** |
+| CSV raw | `x,y,z,qx,qy,qz,qw` | `j1,j2` (rad) |
+| Plot derived | roll/pitch/yaw from quat | deg from rad |
+| Time axis | `t_rel = t - min(t)` | same |
+| Compare | interp planned → actual time | same |
 
-Legend:
-- **Red dashed**: Planned path
-- **Blue/Green/Magenta solid**: Actual path
+## CSV files
 
-## Data Format
+**`planned_path.csv` / `actual_path.csv`**
+```
+time_sec, time_nsec, x, y, z, qx, qy, qz, qw
+```
 
-Expected CSV files in each run directory:
-- `planned_path.csv`: Pre-computed waypoints
-- `actual_path.csv`: Recorded drone position
+**`planned_joint_path.csv` / `actual_joint_path.csv`**
+```
+time_sec, time_nsec, j1, j2
+```
+- `j1` = shoulder (rad)
+- `j2` = elbow (rad)
 
-Both files must have columns:
-- `time_sec`, `time_nsec`: Timestamp
-- `x`, `y`, `z`: Position in meters
-- (Optional) `roll_deg`, `pitch_deg`, `yaw_deg`: Euler angles
+## Figures
+
+1. **Drone**: X/Y/Z, RPY, 3D path  
+2. **Joints**: j1/j2 vs time, time-aligned overlay, joint-space plot  
