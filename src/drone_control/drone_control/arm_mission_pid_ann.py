@@ -4,6 +4,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPo
 
 from geometry_msgs.msg import TwistStamped, PoseStamped
 from nav_msgs.msg import Path
+from sensor_msgs.msg import JointState
 from mavros_msgs.msg import State
 from mavros_msgs.srv import SetMode, CommandBool, CommandLong
 from std_msgs.msg import String
@@ -64,6 +65,7 @@ class ArmMission(Node):
         self.declare_parameter('jerk_limit', self.JERK_LIMIT)
         self.declare_parameter('save_log', True)
         self.declare_parameter('arm_only', False)  # If True: skip takeoff/land, only run arm sequence
+        self.declare_parameter('joint_states_topic', '/x500/joint_states')
 
         self.takeoff_alt = self.get_parameter('takeoff_alt').value
         self.hover_time = self.get_parameter('hover_time').value
@@ -73,6 +75,7 @@ class ArmMission(Node):
         self.jerk_limit = self.get_parameter('jerk_limit').value
         self.save_log = self.get_parameter('save_log').value
         self.arm_only = self.get_parameter('arm_only').value
+        self.joint_states_topic = self.get_parameter('joint_states_topic').value
 
         self.get_logger().info(
             f'Arm mission config: move_time={self.move_time_sec}s, '
@@ -80,28 +83,31 @@ class ArmMission(Node):
             f'accel={self.max_acceleration}, jerk={self.jerk_limit}'
         )
 
-        # ── Arm sequence definition with S-curve trajectories ──
-        # Each step: (shoulder_pwm, elbow_pwm, move_duration_sec, hold_duration_sec)
-        # Move duration: time for smooth S-curve movement
-        # Hold duration: time to maintain position after reaching target
-        # Sv9  (SHOULDER): PWM 500=0°(init), 1500=90°, 2500=180°
-        # Sv10 (ELBOW):    PWM 500=0°,       1500=90°(init), 2500=180°
-        self.arm_sequence = [
-            (1500, 1500, self.move_time_sec, self.hold_time_sec),
-            # Step 2: shoulder 90°, elbow 135°
-            (1500, 2000, self.move_time_sec, self.hold_time_sec),
-            (1500, 2400, self.move_time_sec, self.hold_time_sec),
-            # Step 3: shoulder 135°, elbow 45°
-            (2000, 1500, self.move_time_sec, self.hold_time_sec),
-            (2400, 1500, self.move_time_sec, self.hold_time_sec),
-            (2000, 1500, self.move_time_sec, self.hold_time_sec),
-            (1500, 1000, self.move_time_sec, self.hold_time_sec),
-            # Step 4: shoulder 45°, elbow 90°
-            (1500, 1500, self.move_time_sec, self.hold_time_sec),
+        # ── Arm sequence: write angles in degrees, convert to PWM ──
+        # Map: 0°→500, 90°→1500, 180°→2500 (Sv9 shoulder, Sv10 elbow)
+        # Each stored step: (shoulder_pwm, elbow_pwm, move_sec, hold_sec)
+        arm_seq_deg = [
+            # Step 1: from init 0°/90° → 90°/90°
+            (90, 90),
+            # Step 2: shoulder 90°, elbow up
+            (90, 135),
+            (90, 171),
+            # Step 3: shoulder sweep, then elbow down
+            (135, 90),
+            (171, 90),
+            (135, 90),
+            (90, 45),
+            # Step 4: back to 90°/90°
+            (90, 90),
             # Step 5: shoulder 45°, elbow 90°
-            (1000, 1500, self.move_time_sec, self.hold_time_sec),
-            # Step 6: return to home (shoulder 0°, elbow 90°)
-            (500, 1500, self.move_time_sec, self.hold_time_sec),
+            (45, 90),
+            # Step 6: home (shoulder 0°, elbow 90°)
+            (0, 90),
+        ]
+        mt, ht = self.move_time_sec, self.hold_time_sec
+        self.arm_sequence = [
+            (self.deg_to_pwm(s), self.deg_to_pwm(e), mt, ht)
+            for s, e in arm_seq_deg
         ]
         self.arm_step = 0
         self.step_start_time = None
@@ -110,10 +116,10 @@ class ArmMission(Node):
         self.shoulder_traj = None
         self.elbow_traj = None
 
-        # Init positions (current setup): Sv9=1500, Sv10=1500
-        self.SHOULDER_INIT_PWM = self.PWM_CENTER
-        self.ELBOW_INIT_PWM = self.PWM_CENTER
-        self.INIT_ARM_DURATION = 3.0            # seconds to reach init position
+        # Init (canonical): shoulder 0°, elbow 90°
+        self.SHOULDER_INIT_PWM = self.PWM_MIN     # 500 = 0°
+        self.ELBOW_INIT_PWM = self.PWM_CENTER     # 1500 = 90°
+        self.INIT_ARM_DURATION = 3.0              # seconds to reach init position
         self.init_arm_start_time = None
 
         # ── QoS ──
@@ -129,6 +135,10 @@ class ArmMission(Node):
             TwistStamped, '/mavros/setpoint_velocity/cmd_vel', qos)
         self.planned_path_pub = self.create_publisher(Path, '/planned_path', 10)
         self.actual_path_pub = self.create_publisher(Path, '/actual_path', 10)
+        self.planned_joint_pub = self.create_publisher(
+            JointState, '/planned_joint_states', 10)
+        self.actual_joint_pub = self.create_publisher(
+            JointState, '/actual_joint_states', 10)
         self.target_pose_pub = self.create_publisher(PoseStamped, '/mission/target_pose', 10)
         self.phase_pub = self.create_publisher(String, '/mission/phase', 10)
         self.save_log_pub = self.create_publisher(String, '/mission/save_log', 10)
@@ -141,10 +151,19 @@ class ArmMission(Node):
             State, '/mavros/state',
             self.state_cb, qos)
 
+        self.create_subscription(
+            JointState, self.joint_states_topic,
+            self.joint_state_cb, qos)
+
         self.planned_path = Path()
         self.planned_path.header.frame_id = 'map'
         self.actual_path = Path()
         self.actual_path.header.frame_id = 'map'
+
+        self.actual_shoulder_rad = None
+        self.actual_elbow_rad = None
+        self._logging_joints = False
+        self._last_joint_stamp = None  # sync planned joints to sensor time
 
         # ── Drone state ──
         self.current_x = 0.0
@@ -211,7 +230,59 @@ class ArmMission(Node):
     def state_cb(self, msg):
         self.current_state = msg
 
+    def joint_state_cb(self, msg: JointState):
+        # Same pattern as local_pos_cb: keep sensor stamp for time-aligned logs
+        self._last_joint_stamp = msg.header.stamp
+        name_to_pos = dict(zip(msg.name, msg.position))
+        # Gazebo joint rad == mission rad for both joints
+        if 'shoulder_joint' in name_to_pos:
+            self.actual_shoulder_rad = name_to_pos['shoulder_joint']
+        if 'elbow_joint' in name_to_pos:
+            self.actual_elbow_rad = name_to_pos['elbow_joint']
+
+        if not self._logging_joints:
+            return
+        if self.actual_shoulder_rad is None or self.actual_elbow_rad is None:
+            return
+
+        out = JointState()
+        out.header.stamp = msg.header.stamp
+        out.header.frame_id = 'arm_base_link'
+        out.name = ['shoulder_joint', 'elbow_joint']
+        out.position = [self.actual_shoulder_rad, self.actual_elbow_rad]
+        self.actual_joint_pub.publish(out)
+
     # ── Helpers ──
+
+    @staticmethod
+    def deg_to_pwm(deg: float) -> int:
+        """Map joint angle [0, 180]° → mission PWM [500, 2500]."""
+        deg = max(0.0, min(180.0, float(deg)))
+        span = ArmMission.PWM_MAX - ArmMission.PWM_MIN
+        return int(round(ArmMission.PWM_MIN + deg * span / 180.0))
+
+    @staticmethod
+    def pwm_to_rad(pwm: float) -> float:
+        """Map mission PWM [500, 2500] → joint angle [0, π] rad."""
+        pwm = max(ArmMission.PWM_MIN, min(ArmMission.PWM_MAX, float(pwm)))
+        deg = (pwm - ArmMission.PWM_MIN) * 180.0 / (
+            ArmMission.PWM_MAX - ArmMission.PWM_MIN)
+        return math.radians(deg)
+
+    def publish_planned_joints(self, shoulder_pwm: float, elbow_pwm: float):
+        """Publish planned joints with sensor stamp (like planned path vs pose time)."""
+        msg = JointState()
+        if self._last_joint_stamp is not None:
+            msg.header.stamp = self._last_joint_stamp
+        else:
+            msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'arm_base_link'
+        msg.name = ['shoulder_joint', 'elbow_joint']
+        msg.position = [
+            self.pwm_to_rad(shoulder_pwm),
+            self.pwm_to_rad(elbow_pwm),
+        ]
+        self.planned_joint_pub.publish(msg)
 
     def add_planned(self, x, y, z, qx, qy, qz, qw):
         pose = PoseStamped()
@@ -308,8 +379,10 @@ class ArmMission(Node):
                 f'Moving arm to init: shoulder={self.SHOULDER_INIT_PWM}PWM (0°), '
                 f'elbow={self.ELBOW_INIT_PWM}PWM (90°)'
             )
+            self._logging_joints = True
             self.send_servo(self.SHOULDER_SERVO, self.SHOULDER_INIT_PWM)
             self.send_servo(self.ELBOW_SERVO, self.ELBOW_INIT_PWM)
+            self.publish_planned_joints(self.SHOULDER_INIT_PWM, self.ELBOW_INIT_PWM)
             self.init_arm_start_time = time.time()
             self.mission_state = self.WAIT_INIT_ARM
             return
@@ -321,7 +394,9 @@ class ArmMission(Node):
             if elapsed < self.INIT_ARM_DURATION:
                 self.send_servo(self.SHOULDER_SERVO, self.SHOULDER_INIT_PWM)
                 self.send_servo(self.ELBOW_SERVO, self.ELBOW_INIT_PWM)
+                self.publish_planned_joints(self.SHOULDER_INIT_PWM, self.ELBOW_INIT_PWM)
             else:
+                self._logging_joints = False
                 if self.arm_only:
                     self.get_logger().info('Arm at init position. arm_only=True → skipping takeoff, starting arm sequence...')
                     self.arm_step = 0
@@ -457,6 +532,7 @@ class ArmMission(Node):
                                       self.init_qx, self.init_qy, self.init_qz, self.init_qw)
             if self.arm_step >= len(self.arm_sequence):
                 self.get_logger().info('Arm sequence complete.')
+                self._logging_joints = False
                 if self.arm_only:
                     self.get_logger().info('arm_only=True → mission done.')
                     if self.save_log:
@@ -468,6 +544,7 @@ class ArmMission(Node):
                     self.mission_state = self.HOVER_AFTER_ARM
                 return
 
+            self._logging_joints = True
             shoulder_target, elbow_target, move_duration, hold_duration = self.arm_sequence[self.arm_step]
 
             if self.step_start_time is None:
@@ -515,12 +592,14 @@ class ArmMission(Node):
                     # Send current servo positions
                     self.send_servo(self.SHOULDER_SERVO, shoulder_pwm)
                     self.send_servo(self.ELBOW_SERVO, elbow_pwm)
+                    self.publish_planned_joints(shoulder_pwm, elbow_pwm)
                 else:
                     # Movement complete, switch to hold phase
                     self.shoulder_pwm = shoulder_target
                     self.elbow_pwm = elbow_target
                     self.send_servo(self.SHOULDER_SERVO, shoulder_target)
                     self.send_servo(self.ELBOW_SERVO, elbow_target)
+                    self.publish_planned_joints(shoulder_target, elbow_target)
                     self.step_move_phase = False
                     self.step_start_time = time.time()  # Reset timer for hold phase
                     self.get_logger().info(
@@ -528,6 +607,7 @@ class ArmMission(Node):
                     )
             else:
                 # Hold phase: maintain position
+                self.publish_planned_joints(shoulder_target, elbow_target)
                 if elapsed >= hold_duration:
                     # Hold phase complete, move to next step
                     self.arm_step += 1
@@ -538,6 +618,7 @@ class ArmMission(Node):
 
         # --- HOVER_AFTER_ARM: wait before landing ---
         if s == self.HOVER_AFTER_ARM:
+            self._logging_joints = False
             self.publish_target_pose(self.takeoff_x, self.takeoff_y, self.target_z,
                                       self.init_qx, self.init_qy, self.init_qz, self.init_qw)
             if time.time() - self.hover_start >= self.hover_time:

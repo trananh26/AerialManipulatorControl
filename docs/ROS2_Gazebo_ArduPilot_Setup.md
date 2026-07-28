@@ -163,8 +163,10 @@ source ~/AerialManipulatorControl/install/setup.bash
 
 ## 9. Launch simulation
 
+Headless Gazebo (server only, no GUI) and no RViz. To open the Gazebo window and/or RViz, omit the flags or set them to `true`.
+
 ```bash
-ros2 launch ardupilot_gz_bringup x500_with_arm_runway.launch.py
+ros2 launch ardupilot_gz_bringup x500_with_arm_runway.launch.py use_gz_sim_gui:=false rviz:=false
 ```
 
 ## 10. Run `drone_control` circle mission
