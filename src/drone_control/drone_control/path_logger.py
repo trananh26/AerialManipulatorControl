@@ -6,7 +6,9 @@ Subscribes:
   /planned_joint_states, /actual_joint_states  (sensor_msgs/JointState samples)
   /mission/save_log                        (std_msgs/String trigger)
 
-Mission nodes publish save_log with the mission name (e.g. "arm_mission").
+Default log dir: <workspace>/logs/trajectory_runs/
+  (workspace = ancestor containing src/drone_control; override with log_dir
+   or env AERIAL_MANIPULATOR_LOG_DIR)
 """
 
 import csv
@@ -19,6 +21,29 @@ from rclpy.node import Node
 from nav_msgs.msg import Path
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
+
+from .arm_pwm import JOINT_CSV_HEADER, PATH_CSV_HEADER
+
+
+def find_workspace_log_parent() -> str:
+    """Resolve <workspace>/logs/trajectory_runs even when installed under install/."""
+    env = os.environ.get('AERIAL_MANIPULATOR_LOG_DIR', '').strip()
+    if env:
+        return os.path.abspath(os.path.expanduser(env))
+
+    starts = [os.getcwd(), os.path.abspath(__file__)]
+    for start in starts:
+        d = start if os.path.isdir(start) else os.path.dirname(start)
+        for _ in range(10):
+            if os.path.isdir(os.path.join(d, 'src', 'drone_control')):
+                return os.path.join(d, 'logs', 'trajectory_runs')
+            parent = os.path.dirname(d)
+            if parent == d:
+                break
+            d = parent
+
+    return os.path.join(
+        os.path.expanduser('~'), 'AerialManipulatorControl', 'logs', 'trajectory_runs')
 
 
 class PathLoggerNode(Node):
@@ -42,8 +67,11 @@ class PathLoggerNode(Node):
             JointState, '/actual_joint_states', self._actual_joint_cb, 10)
         self.create_subscription(String, '/mission/save_log', self._save_cb, 10)
 
+        default_parent = (
+            os.path.abspath(self.log_dir) if self.log_dir else find_workspace_log_parent())
         self.get_logger().info(
-            'PathLoggerNode ready — drone paths + arm joints')
+            f'PathLoggerNode ready — drone paths + arm joints '
+            f'(default log parent: {default_parent})')
 
     # ── Callbacks ──
 
@@ -76,11 +104,9 @@ class PathLoggerNode(Node):
         ts = time.strftime('%Y%m%d_%H%M%S')
 
         if self.log_dir:
-            log_parent = os.path.abspath(self.log_dir)
+            log_parent = os.path.abspath(os.path.expanduser(self.log_dir))
         else:
-            workspace_root = os.path.abspath(
-                os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-            log_parent = os.path.join(workspace_root, 'logs', 'trajectory_runs')
+            log_parent = find_workspace_log_parent()
 
         log_dir = os.path.join(log_parent, f'{mission_name}_{ts}')
         os.makedirs(log_dir, exist_ok=True)
@@ -122,8 +148,7 @@ class PathLoggerNode(Node):
     def _write_path_csv(filepath, path_msg: Path):
         with open(filepath, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(
-                ['time_sec', 'time_nsec', 'x', 'y', 'z', 'qx', 'qy', 'qz', 'qw'])
+            writer.writerow(PATH_CSV_HEADER)
             for pose in path_msg.poses:
                 writer.writerow([
                     pose.header.stamp.sec,
@@ -143,8 +168,8 @@ class PathLoggerNode(Node):
         (same idea as qx,qy,qz,qw → roll/pitch/yaw)."""
         with open(filepath, 'w', newline='') as f:
             writer = csv.writer(f)
-            # j1 = shoulder_joint, j2 = elbow_joint
-            writer.writerow(['time_sec', 'time_nsec', 'j1', 'j2'])
+            # j1 = shoulder_joint, j2 = elbow_joint (rad)
+            writer.writerow(JOINT_CSV_HEADER)
             for msg in samples:
                 name_to_pos = dict(zip(msg.name, msg.position))
                 j1 = name_to_pos.get('shoulder_joint')

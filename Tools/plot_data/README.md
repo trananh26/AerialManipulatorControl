@@ -2,6 +2,8 @@
 
 Visualize drone trajectory and arm joint data from mission runs.
 
+Default log parent: **`<workspace>/logs/trajectory_runs/`** (resolves even when the node runs from `install/`). Override with `-p log_dir:=...` or `AERIAL_MANIPULATOR_LOG_DIR`.
+
 ## Setup
 
 ```bash

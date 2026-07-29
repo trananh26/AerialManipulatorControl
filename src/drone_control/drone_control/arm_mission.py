@@ -9,9 +9,9 @@ from mavros_msgs.msg import State
 from mavros_msgs.srv import SetMode, CommandBool, CommandLong
 from std_msgs.msg import String
 
-import math
 import time
 from .trajectory import SCurveTrajectory, MultiJointTrajectory
+from . import arm_pwm
 
 
 class ArmMission(Node):
@@ -45,9 +45,9 @@ class ArmMission(Node):
     ELBOW_SERVO = 10     # SERVO10 = AUX2
 
     # PWM limits
-    PWM_MIN = 500
-    PWM_MAX = 2500
-    PWM_CENTER = 1500
+    PWM_MIN = arm_pwm.PWM_MIN
+    PWM_MAX = arm_pwm.PWM_MAX
+    PWM_CENTER = arm_pwm.PWM_CENTER
 
     # S-curve trajectory parameters for smooth motion
     MAX_ACCELERATION = 50.0  # PWM units/sec² (adjust based on servo specs)
@@ -277,18 +277,11 @@ class ArmMission(Node):
 
     @staticmethod
     def deg_to_pwm(deg: float) -> int:
-        """Map joint angle [0, 180]° → mission PWM [500, 2500]."""
-        deg = max(0.0, min(180.0, float(deg)))
-        span = ArmMission.PWM_MAX - ArmMission.PWM_MIN
-        return int(round(ArmMission.PWM_MIN + deg * span / 180.0))
+        return arm_pwm.deg_to_pwm(deg)
 
     @staticmethod
     def pwm_to_rad(pwm: float) -> float:
-        """Map mission PWM [500, 2500] → joint angle [0, π] rad."""
-        pwm = max(ArmMission.PWM_MIN, min(ArmMission.PWM_MAX, float(pwm)))
-        deg = (pwm - ArmMission.PWM_MIN) * 180.0 / (
-            ArmMission.PWM_MAX - ArmMission.PWM_MIN)
-        return math.radians(deg)
+        return arm_pwm.pwm_to_rad(pwm)
 
     def publish_planned_joints(self, shoulder_pwm: float, elbow_pwm: float):
         """Publish planned joints with sensor stamp (like planned path vs pose time)."""

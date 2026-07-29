@@ -1,5 +1,5 @@
 repositories:
-  # ── Repos có thay đổi → trỏ vào fork ────────────────────────
+  # ── Repos có thay đổi → trỏ vào fork (đồng bộ với .gitmodules) ──
   ardupilot:
     type: git
     url: https://github.com/NguyenAn20279/ardupilot.git
@@ -8,7 +8,12 @@ repositories:
   ardupilot_gz:
     type: git
     url: https://github.com/NguyenAn20279/ardupilot_gz.git
-    version: feat/arducopter-only-gazebo-sitl
+    version: feat/x500-with-arm
+
+  ardupilot_gazebo:
+    type: git
+    url: https://github.com/NguyenAn20279/ardupilot_gazebo.git
+    version: feat/x500-with-arm
 
   ardupilot_sitl_models:
     type: git
@@ -20,12 +25,7 @@ repositories:
     url: https://github.com/NguyenAn20279/ros_gz.git
     version: feat/arducopter-only-gazebo-sitl
 
-  # ── Repos chưa sửa → trỏ vào fork, giữ nguyên branch gốc ───
-  ardupilot_gazebo:
-    type: git
-    url: https://github.com/NguyenAn20279/ardupilot_gazebo.git
-    version: ros2
-
+  # ── Upstream-aligned forks ───────────────────────────────────
   micro_ros_agent:
     type: git
     url: https://github.com/NguyenAn20279/micro-ROS-Agent.git

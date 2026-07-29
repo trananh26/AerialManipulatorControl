@@ -1,5 +1,5 @@
 # External repos — now managed as git submodules
-# (see .gitmodules)
+# (see .gitmodules; ros2_gz.repos kept in sync)
 
 # ROS2 build artifacts
 build/
@@ -7,10 +7,11 @@ install/
 log/
 logs/
 
-# VS Code IntelliSense DB
+# VS Code IntelliSense DB / local IDE junk
 .vscode/browse.vc.db
 .vscode/browse.vc.db-shm
 .vscode/browse.vc.db-wal
+src/.vscode/
 
 # Tools sub-workspace artifacts
 Tools/plot_data/build/
@@ -18,10 +19,21 @@ Tools/plot_data/install/
 Tools/plot_data/log/
 Tools/plot_data/.venv/
 
-# ArduPilot runtime files
+# ArduPilot / MAVLink runtime files at workspace root
 eeprom.bin
+*.parm
 mav.parm
+mav_*.parm
+*.tlog
+*.tlog.raw
 mav.tlog
 mav.tlog.raw
 terrain/
-mav_0_1.parm
+
+# Accidental rqt/tf frame dumps
+frames_*.gv
+frames_*.pdf
+
+# Python bytecode
+**/__pycache__/
+*.py[cod]
