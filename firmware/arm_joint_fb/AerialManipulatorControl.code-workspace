@@ -1,0 +1,22 @@
+{
+	"folders": [
+		{
+			"path": "../.."
+		},
+		{
+			"name": "arm_joint_fb",
+			"path": "."
+		}
+	],
+	"settings": {
+		"ROS2.distro": "humble",
+		"python.autoComplete.extraPaths": [
+			"/home/an/ros2_project/AerialManipulatorControl/install/ros_gz_interfaces/local/lib/python3.10/dist-packages",
+			"/home/an/ros2_project/AerialManipulatorControl/install/ardupilot_sitl/local/lib/python3.10/dist-packages",
+			"/home/an/ros2_project/AerialManipulatorControl/install/drone_control/lib/python3.10/site-packages",
+			"/home/an/ros2_project/AerialManipulatorControl/install/ardupilot_msgs/local/lib/python3.10/dist-packages",
+			"/opt/ros/humble/lib/python3.10/site-packages",
+			"/opt/ros/humble/local/lib/python3.10/dist-packages"
+		]
+	}
+}

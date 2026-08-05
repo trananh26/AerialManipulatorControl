@@ -6,8 +6,10 @@ Expected line formats from ESP32 (newline-terminated):
   or raw ADC for bring-up:
   A0:<raw>,A1:<raw>
 
+Close PlatformIO / serial monitor before running — only one process may own the port.
+
 Example:
-  ros2 run drone_control arm_fb_bridge --ros-args \
+  ros2 run drone_control arm_fb_bridge --ros-args \\
     -p port:=/dev/ttyUSB0 -p baud:=115200
 """
 
@@ -16,6 +18,7 @@ from __future__ import annotations
 import math
 import re
 import threading
+import time
 
 import rclpy
 from rclpy.node import Node
@@ -64,20 +67,21 @@ class ArmFbBridge(Node):
         self.a1_offset = float(self.get_parameter('a1_offset').value)
 
         self._lock = threading.Lock()
+        self._ser_lock = threading.Lock()
         self._shoulder_rad = 0.0
         self._elbow_rad = 0.0
         self._have_sample = False
+        self.ser = None
+        self._stop = False
 
         self.pub = self.create_publisher(JointState, '/arm/joint_states', 10)
 
-        try:
-            self.ser = serial.Serial(self.port, self.baud, timeout=0.1)
-        except serial.SerialException as exc:
-            self.get_logger().fatal(f'Cannot open {self.port}: {exc}')
-            raise
+        if not self._open_serial():
+            raise SystemExit(f'Cannot open {self.port}')
 
         self.get_logger().info(
-            f'Listening on {self.port} @ {self.baud}, publishing /arm/joint_states'
+            f'Listening on {self.port} @ {self.baud}, publishing /arm/joint_states '
+            '(close pio device monitor / other serial tools first)'
         )
 
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
@@ -86,13 +90,61 @@ class ArmFbBridge(Node):
         period = 1.0 / max(publish_hz, 1.0)
         self.create_timer(period, self._publish_cb)
 
-    def _read_loop(self):
-        while rclpy.ok():
+    def _open_serial(self) -> bool:
+        """Open UART; disable DTR/RTS where possible to reduce ESP32 auto-reset glitches."""
+        with self._ser_lock:
+            if self.ser is not None:
+                try:
+                    self.ser.close()
+                except Exception:
+                    pass
+                self.ser = None
             try:
-                raw = self.ser.readline()
+                self.ser = serial.Serial()
+                self.ser.port = self.port
+                self.ser.baudrate = self.baud
+                self.ser.timeout = 0.2
+                # Avoid toggling lines that reset many ESP32 USB-UART bridges
+                self.ser.dtr = False
+                self.ser.rts = False
+                self.ser.open()
+                try:
+                    self.ser.reset_input_buffer()
+                except Exception:
+                    pass
+                time.sleep(0.3)  # allow board settle if it still reset
+                return True
             except serial.SerialException as exc:
-                self.get_logger().error(f'Serial read error: {exc}')
-                break
+                self.get_logger().error(f'Cannot open {self.port}: {exc}')
+                self.ser = None
+                return False
+
+    def _read_loop(self):
+        while rclpy.ok() and not self._stop:
+            with self._ser_lock:
+                ser = self.ser
+            if ser is None or not ser.is_open:
+                self.get_logger().warn(
+                    f'Reconnecting {self.port}…', throttle_duration_sec=2.0)
+                if not self._open_serial():
+                    time.sleep(1.0)
+                continue
+
+            try:
+                raw = ser.readline()
+            except serial.SerialException as exc:
+                self.get_logger().error(
+                    f'Serial read error: {exc} — will reconnect '
+                    '(is another program using the port?)')
+                with self._ser_lock:
+                    try:
+                        if self.ser is not None:
+                            self.ser.close()
+                    except Exception:
+                        pass
+                    self.ser = None
+                time.sleep(0.5)
+                continue
 
             if not raw:
                 continue
@@ -102,7 +154,7 @@ class ArmFbBridge(Node):
             except Exception:
                 continue
 
-            if not line:
+            if not line or line.startswith('#'):
                 continue
 
             shoulder_deg = None
@@ -120,7 +172,8 @@ class ArmFbBridge(Node):
                     shoulder_deg = a0 * self.a0_scale + self.a0_offset
                     elbow_deg = a1 * self.a1_scale + self.a1_offset
                 else:
-                    self.get_logger().warn(f'Unparsed line: {line!r}', throttle_duration_sec=2.0)
+                    self.get_logger().warn(
+                        f'Unparsed line: {line!r}', throttle_duration_sec=2.0)
                     continue
 
             with self._lock:
@@ -143,8 +196,14 @@ class ArmFbBridge(Node):
         self.pub.publish(msg)
 
     def destroy_node(self):
-        if hasattr(self, 'ser') and self.ser and self.ser.is_open:
-            self.ser.close()
+        self._stop = True
+        with self._ser_lock:
+            if self.ser is not None and self.ser.is_open:
+                try:
+                    self.ser.close()
+                except Exception:
+                    pass
+                self.ser = None
         super().destroy_node()
 
 
