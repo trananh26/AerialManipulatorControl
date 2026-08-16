@@ -2,6 +2,8 @@
 
 Visualize drone trajectory and arm joint data from mission runs.
 
+Default log parent: **`<workspace>/logs/trajectory_runs/`** (resolves even when the node runs from `install/`). Override with `-p log_dir:=...` or `AERIAL_MANIPULATOR_LOG_DIR`.
+
 ## Setup
 
 ```bash
@@ -26,7 +28,7 @@ python plot_trajectory.py --list
 | Actual stamp | `/mavros/.../pose` header | `/x500/joint_states` header |
 | Planned stamp | mission clock (ideally same domain) | **same as last joint_states stamp** |
 | CSV raw | `x,y,z,qx,qy,qz,qw` | `j1,j2` (rad) |
-| Plot derived | roll/pitch/yaw from quat | deg from rad |
+| Plot derived | roll/pitch/yaw from quat | rad (same as CSV) |
 | Time axis | `t_rel = t - min(t)` | same |
 | Compare | interp planned → actual time | same |
 

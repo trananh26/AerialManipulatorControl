@@ -1,240 +1,157 @@
-# Changelog & User Guide
+# Arm Control User Guide
 
-Tài liệu này mô tả các thay đổi trong nhánh `feat/x500-with-arm`.
+Canonical guide for the X500 + 2-DOF arm stack (`feat/x500-with-arm`).
+(`docs/X500_ARM_MISSION_GUIDE.md` redirects here.)
 
 ---
 
-## 1. Servo Motor Model – PWM range mới
+## 1. PWM map (SERVO9 / SERVO10)
 
-### Thay đổi
-
-
-| Servo                                | PWM 500       | PWM 1500       | PWM 2500 |
-| ------------------------------------ | ------------- | -------------- | -------- |
-| **Sv9 – Shoulder** (`SERVO9 / AUX1`) | 0° **(init)** | 90°            | 180°     |
-| **Sv10 – Elbow** (`SERVO10 / AUX2`)  | 0°            | 90° **(init)** | 180°     |
-
-
-Dải PWM trước đây là 1100–1900 (range 800), nay đổi thành **500–2500 (range 2000)** để khớp với servo thực tế.
-
-### Constants trong code
-
-```python
-PWM_MIN    = 500    # 0°
-PWM_CENTER = 1500   # 90°
-PWM_MAX    = 2500   # 180°
-```
-
-
-
-### Công thức tính PWM từ góc
+| Servo | PWM 500 | PWM 1500 | PWM 2500 |
+|-------|---------|----------|----------|
+| **Sv9 – Shoulder** | 0° **(init)** | 90° | 180° |
+| **Sv10 – Elbow** | 0° | 90° **(init)** | 180° |
 
 ```
 PWM = 500 + angle_deg × (2000 / 180)
 ```
 
----
+Code: `drone_control/arm_pwm.py` (`deg_to_pwm`, `pwm_to_rad`).
 
-
-
-## 2. State Machine – INIT_ARM_POS trước khi arm drone
-
-
-
-### Mô tả
-
-Thêm 2 state mới vào đầu mission để đưa arm về vị trí khởi đầu an toàn **trước khi** arm động cơ drone, tránh arm di chuyển đột ngột khi drone bắt đầu quay motor.
-
-### Flow mới
-
-```
-WAIT_CONN → SEND_GUIDED → WAIT_GUIDED
-    → INIT_ARM_POS    ← gửi servo về init position
-    → WAIT_INIT_ARM   ← chờ 3 giây để arm di chuyển xong
-    → SEND_ARM → WAIT_ARM → ...
-```
-
-
-
-### Vị trí init (canonical — Gazebo rad == mission rad)
-
-- Sv9 (Shoulder): **500 PWM = 0°** (Gazebo ≈ 0)
-- Sv10 (Elbow): **1500 PWM = 90°** (Gazebo ≈ π/2) — pose CAD rest giữ bằng offset link −π/2
-
-
-
-### Tùy chỉnh thời gian chờ
-
-Sửa `INIT_ARM_DURATION` trong `arm_mission.py` (mặc định 3.0 giây):
-
-```python
-self.INIT_ARM_DURATION = 3.0  # seconds
-```
+SITL params (`gazebo-x500.parm`): `SERVO9/10_MIN=500`, `MAX=2500`,
+`SERVO9_TRIM=500`, `SERVO10_TRIM=1500`. **`ARMING_CHECK=1`** (all pre-arm checks on).
 
 ---
 
-
-
-## 3. Chế độ arm_only – Điều khiển arm không cần takeoff
-
-
-
-### Mô tả
-
-Thêm parameter `arm_only` cho phép chạy toàn bộ arm sequence mà **không cần arm drone, takeoff, hay land**. Hữu ích khi test arm trên mặt đất.
-
-### Flow khi `arm_only:=true`
+## 2. Init before motors
 
 ```
-WAIT_CONN → SEND_GUIDED → WAIT_GUIDED
-    → INIT_ARM_POS → WAIT_INIT_ARM
-    → ARM_SEQUENCE   ← bỏ qua SEND_ARM/WAIT_ARM/TAKEOFF
-    → DONE           ← bỏ qua HOVER/LAND
+WAIT_CONN → GUIDED → INIT_ARM_POS → WAIT_INIT_ARM (3 s)
+  → SEND_ARM → … → takeoff → ARM_SEQUENCE → land
 ```
 
+Init: shoulder **0°**, elbow **90°** (Gazebo rad == mission rad).
 
-
-### Lưu ý
-
-- Drone vẫn cần kết nối MAVROS và ở chế độ GUIDED để nhận lệnh servo.
-- Drone **không** được arm động cơ → cánh quạt không quay.
-
----
-
-
-
-## 4. Cách chạy
-
-Source workspace:
-
-```bash
-source ~/AerialManipulatorControl/install/setup.bash
-```
-
-
-
-### Mô phỏng
-
-Terminal 1:
-
-```bash
-ros2 launch ardupilot_gz_bringup x500_with_arm_runway.launch.py
-```
-
-Terminal 2:
-
-```bash
-# Terminal riêng, chạy song song với mission node
-ros2 run drone_control path_logger
-
-# Hoặc
-# Tùy chỉnh thư mục lưu log (mặc định: <workspace>/logs/trajectory_runs/)
-ros2 run drone_control path_logger --ros-args -p log_dir:=~/AMLogs
-```
-
-Terminal 3:
-
-**Chỉ điều khiển arm (không takeoff):**
+### `arm_only`
 
 ```bash
 ros2 run drone_control arm_mission --ros-args -p arm_only:=true
 ```
 
-**Chạy mission đầy đủ (arm drone + takeoff + arm sequence + land):**
+Skips arming / takeoff / land. Still needs MAVROS + GUIDED for `DO_SET_SERVO`.
+
+---
+
+## 3. How to run (sim)
+
+```bash
+source ~/AerialManipulatorControl/install/setup.bash   # adjust path
+```
+
+**Terminal 1 — Gazebo (headless, yaw 0):**
+
+```bash
+ros2 launch ardupilot_gz_bringup x500_with_arm_runway.launch.py \
+  use_gz_sim_gui:=false rviz:=false Y:=0
+```
+
+Spawn pose args (`x`,`y`,`z`,`R`,`P`,`Y`) are declared on the runway launch and
+forwarded to the robot spawn. Default yaw is **0 rad**.
+
+**Terminal 2 — path logger:**
+
+```bash
+ros2 run drone_control path_logger
+# optional: -p log_dir:=/path/to/logs
+# or: export AERIAL_MANIPULATOR_LOG_DIR=/path/to/logs
+```
+
+Default directory: **`<workspace>/logs/trajectory_runs/`**
+(workspace = ancestor that contains `src/drone_control`).
+
+**Terminal 3 — mission:**
 
 ```bash
 ros2 run drone_control arm_mission
-# hoặc
-ros2 run drone_control arm_mission --ros-args -p arm_only:=false
+# or: --ros-args -p arm_only:=true
 ```
 
-**Chạy mission mô phỏng bỏ qua giao diện và set Yaw=0:**
+With `ARMING_CHECK=1`, wait until EKF/GPS are healthy before the mission can arm.
 
-```bash
-ros2 launch ardupilot_gz_bringup x500_with_arm_runway.launch.py use_gz_sim_gui:=false rviz:=false Y:=0
-```
+---
 
+## 4. Path logger topics & CSV
 
+| Topic | Type | Role |
+|-------|------|------|
+| `/planned_path` | `nav_msgs/Path` | Drone planned |
+| `/actual_path` | `nav_msgs/Path` | Drone actual |
+| `/planned_joint_states` | `sensor_msgs/JointState` | Arm planned (rad) |
+| `/actual_joint_states` | `sensor_msgs/JointState` | Arm actual (rad) |
+| `/mission/save_log` | `std_msgs/String` | Trigger save (`data` = mission name) |
 
-### Output
-
-Mỗi lần lưu tạo thư mục mới:
+Each save creates:
 
 ```
 logs/trajectory_runs/<mission_name>_YYYYMMDD_HHMMSS/
-    planned_path.csv    # x, y, z, qx, qy, qz, qw theo thời gian
-    actual_path.csv     # x, y, z, qx, qy, qz, qw theo thời gian
+  planned_path.csv          # time_sec,time_nsec,x,y,z,qx,qy,qz,qw
+  actual_path.csv
+  planned_joint_path.csv    # time_sec,time_nsec,j1,j2  (rad; j1=shoulder, j2=elbow)
+  actual_joint_path.csv
 ```
 
-
-
-### Trigger thủ công
+Plot:
 
 ```bash
-ros2 topic pub --once /mission/save_log std_msgs/String "data: 'my_test'"
+cd Tools/plot_data && source .venv/bin/activate
+python plot_trajectory.py          # latest run
+python plot_trajectory.py --list
 ```
 
 ---
 
-
-
-## 5. arm_mission – Tất cả parameters
+## 5. `arm_mission` parameters
 
 ```bash
 ros2 run drone_control arm_mission --ros-args \
-    -p takeoff_alt:=5.0 \        # Độ cao takeoff (m)
-    -p hover_time:=3.0 \         # Thời gian hover trước/sau arm (s)
-    -p move_time_sec:=5.0 \      # Thời gian di chuyển mỗi bước arm (s)
-    -p hold_time_sec:=1.0 \      # Thời gian giữ nguyên sau mỗi bước (s)
-    -p max_acceleration:=50.0 \  # Gia tốc tối đa S-curve (PWM/s²)
-    -p jerk_limit:=100.0 \       # Giới hạn jerk S-curve (PWM/s³)
-    -p save_log:=true \          # Tự động trigger lưu log sau mission
-    -p arm_only:=false           # true = chỉ chạy arm, không takeoff
+  -p takeoff_alt:=3.0 \
+  -p hover_time:=3.0 \
+  -p move_time_sec:=6.0 \
+  -p hold_time_sec:=3.0 \
+  -p save_log:=true \
+  -p arm_only:=false \
+  -p joint_states_topic:=/x500/joint_states
+```
+
+Hardware feedback (ESP32 bridge): remap to `/arm/joint_states`:
+
+```bash
+ros2 run drone_control arm_fb_bridge
+ros2 run drone_control arm_mission --ros-args \
+  -p joint_states_topic:=/arm/joint_states
 ```
 
 ---
 
+## 6. Default arm sequence (degrees → PWM)
 
+| Step | Shoulder | Elbow |
+|------|----------|-------|
+| Init | 0° | 90° |
+| 1 | 90° | 90° |
+| 2a–b | 90° | 135° → 180° |
+| 3a–d | 135° → 180° → 135° → 90° | 90° → 90° → 90° → 45° |
+| 4 | 90° | 90° |
+| 5 | 45° | 90° |
+| 6 (home) | 0° | 90° |
 
-## 6. Fix – AP_RobotisServo missing library
+Defined as `arm_seq_deg` in `arm_mission.py`.
 
+---
 
-
-### Vấn đề
-
-Build ArduPilot SITL thất bại với lỗi:
-
-```
-fatal error: AP_RobotisServo/AP_RobotisServo.h: No such file or directory
-```
-
-
-
-### Nguyên nhân
-
-Thư mục `src/ardupilot/libraries/AP_RobotisServo/` tồn tại trong git tree nhưng bị thiếu nội dung trong working directory (checkout không đầy đủ).
-
-### Fix
+## 7. AP_RobotisServo missing (SITL build)
 
 ```bash
 cd src/ardupilot
 git checkout HEAD -- libraries/AP_RobotisServo/
 ```
-
----
-
-
-
-## 7. Arm Sequence mặc định
-
-
-| Bước                 | Shoulder (Sv9)  | Elbow (Sv10)    |
-| -------------------- | --------------- | --------------- |
-| Init (trước takeoff) | 500 PWM = 0°    | 1500 PWM = 90°  |
-| Step 1               | 1500 PWM = 90°  | 1500 PWM = 90°  |
-| Step 2               | 1500 PWM = 90°  | 2000 PWM = 135° |
-| Step 3               | 2000 PWM = 135° | 1000 PWM = 45°  |
-| Step 4               | 1000 PWM = 45°  | 1500 PWM = 90°  |
-| Step 5 (home)        | 500 PWM = 0°    | 1500 PWM = 90°  |
-
-

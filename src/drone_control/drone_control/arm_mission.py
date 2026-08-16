@@ -9,9 +9,9 @@ from mavros_msgs.msg import State
 from mavros_msgs.srv import SetMode, CommandBool, CommandLong
 from std_msgs.msg import String
 
-import math
 import time
 from .trajectory import SCurveTrajectory, MultiJointTrajectory
+from . import arm_pwm
 
 
 class ArmMission(Node):
@@ -45,9 +45,9 @@ class ArmMission(Node):
     ELBOW_SERVO = 10     # SERVO10 = AUX2
 
     # PWM limits
-    PWM_MIN = 500
-    PWM_MAX = 2500
-    PWM_CENTER = 1500
+    PWM_MIN = arm_pwm.PWM_MIN
+    PWM_MAX = arm_pwm.PWM_MAX
+    PWM_CENTER = arm_pwm.PWM_CENTER
 
     # S-curve trajectory parameters for smooth motion
     MAX_ACCELERATION = 50.0  # PWM units/sec² (adjust based on servo specs)
@@ -161,7 +161,9 @@ class ArmMission(Node):
         self.actual_shoulder_rad = None
         self.actual_elbow_rad = None
         self._logging_joints = False
+        self._logging_drone_path = False  # True from first planned waypoint → disarm
         self._last_joint_stamp = None  # sync planned joints to sensor time
+        self._last_pose_stamp = None   # sync planned path to pose time when possible
 
         # ── Drone state ──
         self.current_x = 0.0
@@ -214,7 +216,9 @@ class ArmMission(Node):
         self.current_qy = msg.pose.orientation.y
         self.current_qz = msg.pose.orientation.z
         self.current_qw = msg.pose.orientation.w
-        if self.CLIMBING <= self.mission_state <= self.WAIT_DISARM:
+        self._last_pose_stamp = msg.header.stamp
+        # Log from first planned waypoint (WAIT_STABLE) through WAIT_DISARM — not only CLIMBING
+        if self._logging_drone_path:
             pose = PoseStamped()
             pose.header = msg.header
             pose.header.frame_id = 'map'
@@ -222,6 +226,27 @@ class ArmMission(Node):
             self.actual_path.poses.append(pose)
             self.actual_path.header.stamp = msg.header.stamp
             self.actual_path_pub.publish(self.actual_path)
+
+            # Stream planned setpoint at pose rate so Z is not a long diagonal
+            # between sparse climb (z=target) and land (z=0.2) waypoints.
+            z_cmd = self._planned_z_setpoint()
+            if z_cmd is not None:
+                px = self.takeoff_x if self.mission_state >= self.CLIMBING else self.current_x
+                py = self.takeoff_y if self.mission_state >= self.CLIMBING else self.current_y
+                self.add_planned(
+                    px, py, z_cmd,
+                    self.init_qx, self.init_qy, self.init_qz, self.init_qw)
+
+    def _planned_z_setpoint(self):
+        """Intended altitude for planned_path while streaming with actual poses."""
+        s = self.mission_state
+        if s in (self.WAIT_STABLE, self.SEND_TAKEOFF, self.WAIT_TAKEOFF):
+            return 0.2
+        if self.CLIMBING <= s <= self.HOVER_AFTER_ARM:
+            return self.target_z
+        if s in (self.WAIT_LAND, self.WAIT_DISARM, self.SEND_LAND):
+            return 0.2
+        return None
 
     def state_cb(self, msg):
         self.current_state = msg
@@ -252,18 +277,11 @@ class ArmMission(Node):
 
     @staticmethod
     def deg_to_pwm(deg: float) -> int:
-        """Map joint angle [0, 180]° → mission PWM [500, 2500]."""
-        deg = max(0.0, min(180.0, float(deg)))
-        span = ArmMission.PWM_MAX - ArmMission.PWM_MIN
-        return int(round(ArmMission.PWM_MIN + deg * span / 180.0))
+        return arm_pwm.deg_to_pwm(deg)
 
     @staticmethod
     def pwm_to_rad(pwm: float) -> float:
-        """Map mission PWM [500, 2500] → joint angle [0, π] rad."""
-        pwm = max(ArmMission.PWM_MIN, min(ArmMission.PWM_MAX, float(pwm)))
-        deg = (pwm - ArmMission.PWM_MIN) * 180.0 / (
-            ArmMission.PWM_MAX - ArmMission.PWM_MIN)
-        return math.radians(deg)
+        return arm_pwm.pwm_to_rad(pwm)
 
     def publish_planned_joints(self, shoulder_pwm: float, elbow_pwm: float):
         """Publish planned joints with sensor stamp (like planned path vs pose time)."""
@@ -282,7 +300,11 @@ class ArmMission(Node):
 
     def add_planned(self, x, y, z, qx, qy, qz, qw):
         pose = PoseStamped()
-        pose.header.stamp = self.get_clock().now().to_msg()
+        # Prefer pose stamp so planned/actual share the same time base on plots
+        if self._last_pose_stamp is not None:
+            pose.header.stamp = self._last_pose_stamp
+        else:
+            pose.header.stamp = self.get_clock().now().to_msg()
         pose.header.frame_id = 'map'
         pose.pose.position.x = x
         pose.pose.position.y = y
@@ -354,8 +376,8 @@ class ArmMission(Node):
         # --- INIT_ARM_POS: move arm to init position before arming ---
         if s == self.INIT_ARM_POS:
             self.get_logger().info(
-                f'Moving arm to init: shoulder={self.SHOULDER_INIT_PWM}PWM (0°), '
-                f'elbow={self.ELBOW_INIT_PWM}PWM (90°)'
+                f'Moving arm to init: shoulder={self.pwm_to_rad(self.SHOULDER_INIT_PWM):.3f} rad (0°), '
+                f'elbow={self.pwm_to_rad(self.ELBOW_INIT_PWM):.3f} rad (90°)'
             )
             self._logging_joints = True
             self.send_servo(self.SHOULDER_SERVO, self.SHOULDER_INIT_PWM)
@@ -417,6 +439,7 @@ class ArmMission(Node):
                     self.init_qy = self.current_qy
                     self.init_qz = self.current_qz
                     self.init_qw = self.current_qw
+                    self._logging_drone_path = True  # start actual_path with planned
                     self.add_planned(self.current_x, self.current_y, 0.2,
                                      self.init_qx, self.init_qy, self.init_qz, self.init_qw)
                 elapsed = (self.get_clock().now() - self.arm_time).nanoseconds / 1e9
@@ -503,7 +526,8 @@ class ArmMission(Node):
                 # Initialize trajectories for this step
                 self.get_logger().info(
                     f'Step {self.arm_step + 1}/{len(self.arm_sequence)}: '
-                    f'Moving to shoulder={shoulder_target}PWM, elbow={elbow_target}PWM '
+                    f'Moving to shoulder={self.pwm_to_rad(shoulder_target):.3f} rad, '
+                    f'elbow={self.pwm_to_rad(elbow_target):.3f} rad '
                     f'over {move_duration}s + hold {hold_duration}s'
                 )
 
@@ -572,10 +596,9 @@ class ArmMission(Node):
         if s == self.HOVER_AFTER_ARM:
             self._logging_joints = False
             if time.time() - self.hover_start >= self.hover_time:
-                steps = int(self.target_z / 0.1)
-                for z in [self.target_z - i * 0.1 for i in range(steps)]:
-                    self.add_planned(self.takeoff_x, self.takeoff_y, z,
-                                     self.init_qx, self.init_qy, self.init_qz, self.init_qw)
+                # One land target; stream timestamps in WAIT_LAND/WAIT_DISARM (not a burst)
+                self.add_planned(self.takeoff_x, self.takeoff_y, 0.2,
+                                 self.init_qx, self.init_qy, self.init_qz, self.init_qw)
                 self.get_logger().info('Landing...')
                 self.mission_state = self.SEND_LAND
             return
@@ -605,6 +628,7 @@ class ArmMission(Node):
         if s == self.WAIT_DISARM:
             if self.current_state and not self.current_state.armed:
                 self.get_logger().info('Disarmed. Mission complete!')
+                self._logging_drone_path = False
                 if self.save_log:
                     self.save_log_pub.publish(String(data='arm_mission'))
                 self.mission_state = self.DONE

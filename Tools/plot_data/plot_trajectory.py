@@ -171,9 +171,7 @@ def _joint_rad_cols(df):
 def plot_joint_path(run_dir, raw_pla, raw_act):
     """Plot joints like drone path: t_rel, planned+actual, interp planned→actual time.
 
-    Drone analogy:
-      x,y,z  → j1, j2 (rad stored; deg for display)
-      roll/pitch/yaw from quat at plot time → deg from rad at plot time
+    CSV stores rad; plots also use rad (same raw units as logged).
     """
     if raw_pla is None or raw_act is None or len(raw_pla) == 0 or len(raw_act) == 0:
         print('Need both planned and actual joint CSVs — skipping joint plot')
@@ -188,49 +186,42 @@ def plot_joint_path(run_dir, raw_pla, raw_act):
     act_t = df_act_t - t_start
     pla_t = df_pla_t - t_start
 
-    # Degrees for display (like converting quat→euler at plot time)
-    pla_j1_deg, pla_j2_deg = np.degrees(pla_j1), np.degrees(pla_j2)
-    act_j1_deg, act_j2_deg = np.degrees(act_j1), np.degrees(act_j2)
-
     # Interpolate planned onto actual time base (same as RPY plot)
-    interp_j1 = np.interp(act_t, pla_t, pla_j1_deg)
-    interp_j2 = np.interp(act_t, pla_t, pla_j2_deg)
+    interp_j1 = np.interp(act_t, pla_t, pla_j1)
+    interp_j2 = np.interp(act_t, pla_t, pla_j2)
 
     fig = plt.figure(figsize=(16, 8))
     fig.suptitle(
         f'Arm Joints: {run_dir.name}', fontsize=16, fontweight='bold')
     grid = plt.GridSpec(2, 2, wspace=0.3, hspace=0.35)
 
-    # Column 0: joint vs time (like x/y/z vs time)
     ax_j1 = fig.add_subplot(grid[0, 0])
-    ax_j1.plot(pla_t, pla_j1_deg, 'r--', label='Planned', linewidth=2)
-    ax_j1.plot(act_t, act_j1_deg, 'b-', label='Actual', alpha=0.7)
-    fix_axis(ax_j1, 'Joint 1 (shoulder)', 'Angle (deg)')
+    ax_j1.plot(pla_t, pla_j1, 'r--', label='Planned', linewidth=2)
+    ax_j1.plot(act_t, act_j1, 'b-', label='Actual', alpha=0.7)
+    fix_axis(ax_j1, 'Joint 1 (shoulder)', 'Angle (rad)')
 
     ax_j2 = fig.add_subplot(grid[1, 0])
-    ax_j2.plot(pla_t, pla_j2_deg, 'r--', label='Planned', linewidth=2)
-    ax_j2.plot(act_t, act_j2_deg, 'g-', label='Actual', alpha=0.7)
+    ax_j2.plot(pla_t, pla_j2, 'r--', label='Planned', linewidth=2)
+    ax_j2.plot(act_t, act_j2, 'g-', label='Actual', alpha=0.7)
     ax_j2.set_xlabel('Time (s)')
-    fix_axis(ax_j2, 'Joint 2 (elbow)', 'Angle (deg)')
+    fix_axis(ax_j2, 'Joint 2 (elbow)', 'Angle (rad)')
 
-    # Column 1 top: overlay on common time (like RPY planned interp)
     ax_cmp = fig.add_subplot(grid[0, 1])
     ax_cmp.plot(act_t, interp_j1, 'r--', label='Planned j1', linewidth=2)
-    ax_cmp.plot(act_t, act_j1_deg, 'b-', label='Actual j1', alpha=0.7)
+    ax_cmp.plot(act_t, act_j1, 'b-', label='Actual j1', alpha=0.7)
     ax_cmp.plot(act_t, interp_j2, color='tab:orange', linestyle='--',
                 label='Planned j2', linewidth=2)
-    ax_cmp.plot(act_t, act_j2_deg, color='tab:green', label='Actual j2', alpha=0.7)
-    fix_axis(ax_cmp, 'Both joints (time-aligned)', 'Angle (deg)')
+    ax_cmp.plot(act_t, act_j2, color='tab:green', label='Actual j2', alpha=0.7)
+    fix_axis(ax_cmp, 'Both joints (time-aligned)', 'Angle (rad)')
 
-    # Column 1 bottom: joint space (like 3D path)
     ax_phase = fig.add_subplot(grid[1, 1])
-    ax_phase.plot(pla_j1_deg, pla_j2_deg, 'r--', label='Planned', linewidth=2)
-    ax_phase.plot(act_j1_deg, act_j2_deg, 'b-', label='Actual', alpha=0.7)
-    ax_phase.scatter([pla_j1_deg[0]], [pla_j2_deg[0]], c='red', s=40, zorder=3)
-    ax_phase.scatter([act_j1_deg[0]], [act_j2_deg[0]], c='blue', s=40, zorder=3)
-    ax_phase.set_xlabel('Joint 1 shoulder (deg)')
-    ax_phase.set_ylabel('Joint 2 elbow (deg)')
-    fix_axis(ax_phase, 'Joint space', 'Joint 2 (deg)')
+    ax_phase.plot(pla_j1, pla_j2, 'r--', label='Planned', linewidth=2)
+    ax_phase.plot(act_j1, act_j2, 'b-', label='Actual', alpha=0.7)
+    ax_phase.scatter([pla_j1[0]], [pla_j2[0]], c='red', s=40, zorder=3)
+    ax_phase.scatter([act_j1[0]], [act_j2[0]], c='blue', s=40, zorder=3)
+    ax_phase.set_xlabel('Joint 1 shoulder (rad)')
+    ax_phase.set_ylabel('Joint 2 elbow (rad)')
+    fix_axis(ax_phase, 'Joint space', 'Joint 2 (rad)')
     ax_phase.set_aspect('equal', adjustable='datalim')
 
     print(f'Joint path: planned={len(pla_j1)}, actual={len(act_j1)}, '
