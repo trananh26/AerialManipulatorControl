@@ -10,20 +10,30 @@ For full history use `git log`.
 
 ## [Unreleased]
 
+### Planned
+
+- Calibrate ADC↔angle on real pots / FB and wire end-to-end on hardware
+
+---
+
+## [2026-08-18] — 0–270° servo calibration & sim/hardware docs
+
 ### Added
 
 - ESP32 DOIT DevKit V1 firmware (`firmware/arm_joint_fb/`): dual ADC → serial
   `S:deg,E:deg` / `A0,A1` for `arm_fb_bridge`
+- Firmware: piecewise-linear ADC→deg (`adcToDeg` + `kEsp32Calib` table)
+- `docs/ARM_CONTROL_USER_GUIDE.md`: full **sim vs hardware** runbook
+  (Gazebo/SITL §3, Pi + Pixhawk + ESP32 §4)
 
 ### Changed
 
 - Arm PWM map **0°…270°** (500–2500): 90°→1167, 180°→1833, 270°→2500
-- Elbow init / `SERVO10_TRIM` = **1167** (was 1500, which is now 135°)
-- Gazebo arm joint limits + ArduPilotPlugin multiplier = **3π/2**
-
-### Planned
-
-- Calibrate ADC↔angle on real pots / FB and wire end-to-end on hardware
+- `PWM_CENTER` removed → **`PWM_90 = 1167`** (elbow init / SERVO10_TRIM)
+- Gazebo arm joint upper limit **3.14 → 4.71239** (3π/2)
+- `gazebo-x500.parm`: `SERVO10_TRIM` **1500 → 1167**
+- Tests updated for 270° map (12 passed)
+- README, firmware README (PlatformIO GUI), X500_FLIP_BUG_FIX docs aligned
 
 ---
 
