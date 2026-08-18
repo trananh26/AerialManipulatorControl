@@ -47,7 +47,7 @@ class ArmMission(Node):
     # PWM limits
     PWM_MIN = arm_pwm.PWM_MIN
     PWM_MAX = arm_pwm.PWM_MAX
-    PWM_CENTER = arm_pwm.PWM_CENTER
+    PWM_90 = arm_pwm.PWM_90
 
     # S-curve trajectory parameters for smooth motion
     MAX_ACCELERATION = 50.0  # PWM units/sec² (adjust based on servo specs)
@@ -84,7 +84,7 @@ class ArmMission(Node):
         )
 
         # ── Arm sequence: write angles in degrees, convert to PWM ──
-        # Map: 0°→500, 90°→1500, 180°→2500 (Sv9 shoulder, Sv10 elbow)
+        # Map: 0°→500, 90°→1167, 180°→1833, 270°→2500 (Sv9 shoulder, Sv10 elbow)
         # Each stored step: (shoulder_pwm, elbow_pwm, move_sec, hold_sec)
         arm_seq_deg = [
             # Step 1: from init 0°/90° → 90°/90°
@@ -118,7 +118,7 @@ class ArmMission(Node):
 
         # Init (canonical): shoulder 0°, elbow 90°
         self.SHOULDER_INIT_PWM = self.PWM_MIN     # 500 = 0°
-        self.ELBOW_INIT_PWM = self.PWM_CENTER     # 1500 = 90°
+        self.ELBOW_INIT_PWM = self.PWM_90         # 1167 = 90°
         self.INIT_ARM_DURATION = 3.0              # seconds to reach init position
         self.init_arm_start_time = None
 

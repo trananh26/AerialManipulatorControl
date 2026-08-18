@@ -15,6 +15,12 @@ For full history use `git log`.
 - ESP32 DOIT DevKit V1 firmware (`firmware/arm_joint_fb/`): dual ADC → serial
   `S:deg,E:deg` / `A0,A1` for `arm_fb_bridge`
 
+### Changed
+
+- Arm PWM map **0°…270°** (500–2500): 90°→1167, 180°→1833, 270°→2500
+- Elbow init / `SERVO10_TRIM` = **1167** (was 1500, which is now 135°)
+- Gazebo arm joint limits + ArduPilotPlugin multiplier = **3π/2**
+
 ### Planned
 
 - Calibrate ADC↔angle on real pots / FB and wire end-to-end on hardware

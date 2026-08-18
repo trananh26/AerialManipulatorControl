@@ -170,7 +170,9 @@ ros2 launch ardupilot_gz_bringup x500_with_arm_runway.launch.py \
   use_gz_sim_gui:=false rviz:=false Y:=0
 ```
 
-Spawn pose (`x`,`y`,`z`,`R`,`P`,`Y`) is forwarded from this launch. See `docs/ARM_CONTROL_USER_GUIDE.md`.
+Spawn pose (`x`,`y`,`z`,`R`,`P`,`Y`) is forwarded from this launch.
+
+For the full **simulation** and **hardware** (Pi + Pixhawk) runbooks, see `docs/ARM_CONTROL_USER_GUIDE.md`.
 
 ## 10. Run `drone_control` circle mission
 

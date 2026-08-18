@@ -213,8 +213,8 @@ x500_with_arm/model.sdf         ← Wrapper: include x500_base + arm
 
 | Joint | Type | Axis | Range | Damping | Friction |
 |-------|------|------|-------|---------|----------|
-| shoulder_joint | revolute | Y | 0 → 3.14 rad (0°–180°) | 0.1 | 0.05 |
-| elbow_joint | revolute | Y | 0 → π (CAD rest @ π/2 = mission 90°) | 0.1 | 0.05 |
+| shoulder_joint | revolute | Y | 0 → 4.71239 rad (0°–270°) | 0.1 | 0.05 |
+| elbow_joint | revolute | Y | 0 → 3π/2 (CAD rest @ π/2 = mission 90°) | 0.1 | 0.05 |
 
 Mesh URIs dùng `package://ardupilot_gazebo/models/arm/` cho RViz compatibility.
 
@@ -232,8 +232,8 @@ MAV_CMD_DO_SET_SERVO (cmd 183)
 
 | Plugin channel | ArduPilot | Param | PWM Range | Góc quay |
 |----------------|-----------|-------|-----------|----------|
-| ch8 | SERVO9 (AUX1) | FUNCTION=0 | 500–2500 | shoulder 0…π (init 0°) |
-| ch9 | SERVO10 (AUX2) | FUNCTION=0 | 500–2500 | elbow 0…π (init 90° / π/2) |
+| ch8 | SERVO9 (AUX1) | FUNCTION=0 | 500–2500 | shoulder 0…3π/2 (init 0°) |
+| ch9 | SERVO10 (AUX2) | FUNCTION=0 | 500–2500 | elbow 0…3π/2 (init 90° / π/2) |
 
 ### JointPositionController PID Tuning
 
@@ -271,11 +271,11 @@ Sử dụng `MAV_CMD_DO_SET_SERVO` (command 183) qua MAVROS service `/mavros/cmd
 ### Điều khiển manual
 
 ```bash
-# Shoulder 90° (PWM 1500)
+# Shoulder 90° (PWM 1167)
 ros2 service call /mavros/cmd/command mavros_msgs/srv/CommandLong \
-  "{command: 183, param1: 9, param2: 1500}"
+  "{command: 183, param1: 9, param2: 1167}"
 
-# Elbow +45° (PWM 1700)
+# Elbow 180° (PWM 1833)
 ros2 service call /mavros/cmd/command mavros_msgs/srv/CommandLong \
-  "{command: 183, param1: 10, param2: 1700}"
+  "{command: 183, param1: 10, param2: 1833}"
 ```
