@@ -12,6 +12,7 @@ For full history use `git log`.
 
 ### Changed
 
+- Mission arm init before takeoff: shoulder **90°** + elbow **90°** (straight via `DO_SET_SERVO`; SDF unchanged)
 - Docs: submodule sync is **sim PC only**; companion Pi needs main repo only
   (README + `ROS2_Gazebo_ArduPilot_Setup.md` §7)
 

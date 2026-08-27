@@ -87,7 +87,7 @@ class ArmMission(Node):
         # Map: 0°→500, 90°→1167, 180°→1833, 270°→2500 (Sv9 shoulder, Sv10 elbow)
         # Each stored step: (shoulder_pwm, elbow_pwm, move_sec, hold_sec)
         arm_seq_deg = [
-            # Step 1: from init 0°/90° → 90°/90°
+            # Step 1: already at init 90°/90° (straight) — hold then continue
             (90, 90),
             # Step 2: shoulder 90°, elbow up
             (90, 135),
@@ -116,8 +116,8 @@ class ArmMission(Node):
         self.shoulder_traj = None
         self.elbow_traj = None
 
-        # Init (canonical): shoulder 0°, elbow 90°
-        self.SHOULDER_INIT_PWM = self.PWM_MIN     # 500 = 0°
+        # Init before takeoff: both 90° (arm straight). Mission DO_SET_SERVO only — not SDF spawn.
+        self.SHOULDER_INIT_PWM = self.PWM_90     # 1167 = 90°
         self.ELBOW_INIT_PWM = self.PWM_90         # 1167 = 90°
         self.INIT_ARM_DURATION = 3.0              # seconds to reach init position
         self.init_arm_start_time = None
@@ -398,8 +398,8 @@ class ArmMission(Node):
         # --- INIT_ARM_POS: move arm to init position before arming ---
         if s == self.INIT_ARM_POS:
             self.get_logger().info(
-                f'Moving arm to init: shoulder={self.pwm_to_rad(self.SHOULDER_INIT_PWM):.3f} rad (0°), '
-                f'elbow={self.pwm_to_rad(self.ELBOW_INIT_PWM):.3f} rad (90°)'
+                f'Moving arm to init: shoulder={self.pwm_to_rad(self.SHOULDER_INIT_PWM):.3f} rad (90°), '
+                f'elbow={self.pwm_to_rad(self.ELBOW_INIT_PWM):.3f} rad (90°) — straight before takeoff'
             )
             self._logging_joints = True
             self.send_servo(self.SHOULDER_SERVO, self.SHOULDER_INIT_PWM)

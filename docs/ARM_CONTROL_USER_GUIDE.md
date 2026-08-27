@@ -29,7 +29,7 @@ Bench-calibrated linear map, 0°…270°:
 
 | Servo | PWM 500 | PWM 1167 | PWM 1833 | PWM 2500 |
 |-------|---------|----------|----------|----------|
-| **Sv9 – Shoulder** | 0° **(init)** | 90° | 180° | 270° |
+| **Sv9 – Shoulder** | 0° | 90° **(init)** | 180° | 270° |
 | **Sv10 – Elbow** | 0° | 90° **(init)** | 180° | 270° |
 
 ```
@@ -52,6 +52,9 @@ SERVO10_TRIM      1167
 ```
 
 SITL already has this in `gazebo-x500.parm`. On hardware, set the same params in Mission Planner / MAVProxy.
+
+Mission `INIT_ARM_POS` commands both joints to **90°** (straight) via `DO_SET_SERVO` before takeoff.
+That is independent of Gazebo SDF spawn / `SERVO*_TRIM` (sim may still spawn shoulder at 0° until mission runs).
 
 ---
 
@@ -223,7 +226,8 @@ WAIT_CONN → GUIDED → INIT_ARM_POS → WAIT_INIT_ARM (3 s)
   → SEND_ARM → … → takeoff → ARM_SEQUENCE → land
 ```
 
-Init: shoulder **0°**, elbow **90°**.
+Init before takeoff (mission only): shoulder **90°**, elbow **90°** (arm straight).
+Does **not** change Gazebo SDF spawn pose.
 
 `arm_only:=true` skips arming / takeoff / land. Still needs MAVROS + GUIDED for `DO_SET_SERVO`.
 Use this for bench tests on hardware and for arm-only checks in sim.
@@ -254,7 +258,7 @@ ros2 run drone_control arm_mission --ros-args \
 
 | Step | Shoulder | Elbow |
 |------|----------|-------|
-| Init | 0° | 90° |
+| Init | 90° | 90° |
 | 1 | 90° | 90° |
 | 2a–b | 90° | 135° → 180° |
 | 3a–d | 135° → 180° → 135° → 90° | 90° → 90° → 90° → 45° |
