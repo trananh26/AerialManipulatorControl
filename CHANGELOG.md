@@ -12,9 +12,8 @@ For full history use `git log`.
 
 ### Changed
 
-- Mission arm init before takeoff: shoulder **90°** + elbow **90°** (straight), was shoulder 0°
-- Docs: submodule sync (`submodule.recurse` / `git submodule update`) is **sim PC only**;
-  companion Pi needs main repo (`drone_control`) only — see README + Setup §7
+- Docs: submodule sync is **sim PC only**; companion Pi needs main repo only
+  (README + `ROS2_Gazebo_ArduPilot_Setup.md` §7)
 
 ### Planned
 

@@ -232,8 +232,8 @@ MAV_CMD_DO_SET_SERVO (cmd 183)
 
 | Plugin channel | ArduPilot | Param | PWM Range | Góc quay |
 |----------------|-----------|-------|-----------|----------|
-| ch8 | SERVO9 (AUX1) | FUNCTION=0 | 500–2500 | shoulder 0…3π/2 (mission init 90° / π/2) |
-| ch9 | SERVO10 (AUX2) | FUNCTION=0 | 500–2500 | elbow 0…3π/2 (mission init 90° / π/2) |
+| ch8 | SERVO9 (AUX1) | FUNCTION=0 | 500–2500 | shoulder 0…3π/2 (init 0°) |
+| ch9 | SERVO10 (AUX2) | FUNCTION=0 | 500–2500 | elbow 0…3π/2 (init 90° / π/2) |
 
 ### JointPositionController PID Tuning
 
