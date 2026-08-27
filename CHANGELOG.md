@@ -10,6 +10,13 @@ For full history use `git log`.
 
 ## [Unreleased]
 
+### Changed
+
+- Mission arm init before takeoff: shoulder **90°** + elbow **90°** (straight), was shoulder 0°
+- `SERVO9_TRIM` / Gazebo shoulder spawn → **1167 / π/2** to match
+- Docs: submodule sync (`submodule.recurse` / `git submodule update`) is **sim PC only**;
+  companion Pi needs main repo (`drone_control`) only — see README + Setup §7
+
 ### Planned
 
 - Calibrate ADC↔angle on real pots / FB and wire end-to-end on hardware

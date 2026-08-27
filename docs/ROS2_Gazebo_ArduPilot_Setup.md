@@ -111,13 +111,15 @@ sudo geographiclib-get-geoids egm96-5
 
 ## 7. Create workspace and import source code
 
+This section is for the **simulation PC** (Gazebo + SITL). A **companion Pi** only needs the main repo packages (`drone_control`, MAVROS, `arm_fb_bridge`) — do **not** init/build `ardupilot_*` / `ros_gz` submodules on the Pi.
+
 Install `vcstool` if not already installed:
 
 ```bash
 sudo apt install -y python3-vcstool
 ```
 
-Clone workspace và import tất cả repos:
+Clone workspace và import tất cả repos (**sim PC**):
 
 ```bash
 # Clone workspace config (setup guide, drone_control, repos file)
@@ -126,6 +128,26 @@ git clone --recursive -b feat/x500-with-arm https://github.com/trananh26/AerialM
 # Import all source repos (ardupilot, ardupilot_gz, ros_gz, etc.)
 vcs import src < ros2_gz.repos
 ```
+
+### Keep submodules in sync (sim PC only)
+
+Each commit of the main repo pins a **SHA** for every submodule (e.g. `ardupilot_gazebo` model updates). After `git pull` or `git checkout <hash|branch>` on the sim machine:
+
+```bash
+# Once per machine — checkout/pull then updates submodules automatically
+git config --global submodule.recurse true
+
+# Or run explicitly after every pull/checkout
+git submodule update --init --recursive
+```
+
+Then rebuild if SDF / launch / parm changed:
+
+```bash
+colcon build --packages-up-to ardupilot_gz_bringup drone_control
+```
+
+**Companion Pi:** clone/pull the main repo without `--recursive` if you want; skip `submodule update`. Build only what you run on hardware (`drone_control`).
 
 Install ArduPilot prerequisites:
 
@@ -197,3 +219,4 @@ Note:
 1. `rosdep init` should be run once per machine.
 2. If `ros2` or `gz` commands are missing in a new terminal, run `source ~/.bashrc`.
 3. The original `GZ_SIM_*` path examples using `~/gz_ws/...` were replaced with `~/AerialManipulatorControl/...` to match this workspace.
+4. Submodule sync (`submodule.recurse` / `git submodule update`) is for the **sim PC**. The Pi companion does not need Gazebo/SITL submodules.

@@ -29,7 +29,7 @@ Bench-calibrated linear map, 0°…270°:
 
 | Servo | PWM 500 | PWM 1167 | PWM 1833 | PWM 2500 |
 |-------|---------|----------|----------|----------|
-| **Sv9 – Shoulder** | 0° **(init)** | 90° | 180° | 270° |
+| **Sv9 – Shoulder** | 0° | 90° **(init)** | 180° | 270° |
 | **Sv10 – Elbow** | 0° | 90° **(init)** | 180° | 270° |
 
 ```
@@ -44,7 +44,7 @@ Set the same range on the flight controller (`SERVO9` / `SERVO10`):
 SERVO9_FUNCTION   0
 SERVO9_MIN        500
 SERVO9_MAX        2500
-SERVO9_TRIM       500
+SERVO9_TRIM       1167
 SERVO10_FUNCTION  0
 SERVO10_MIN       500
 SERVO10_MAX       2500
@@ -52,6 +52,7 @@ SERVO10_TRIM      1167
 ```
 
 SITL already has this in `gazebo-x500.parm`. On hardware, set the same params in Mission Planner / MAVProxy.
+Mission `INIT_ARM_POS` also commands both servos to **90°** before takeoff.
 
 ---
 
@@ -131,7 +132,7 @@ PWM command still goes **Pixhawk AUX**, not the Pi. The Pi only runs ROS (MAVROS
 
 ### 4.1 FC params
 
-On the real Pixhawk, match §1 (`SERVO9/10` `FUNCTION=0`, `MIN=500`, `MAX=2500`, elbow `TRIM=1167`).
+On the real Pixhawk, match §1 (`SERVO9/10` `FUNCTION=0`, `MIN=500`, `MAX=2500`, both `TRIM=1167` for 90° init).
 PWM wires: shoulder → **AUX1 / SERVO9**, elbow → **AUX2 / SERVO10**. Common GND with the FC.
 
 ### 4.2 Terminal 1 — MAVROS
@@ -223,7 +224,7 @@ WAIT_CONN → GUIDED → INIT_ARM_POS → WAIT_INIT_ARM (3 s)
   → SEND_ARM → … → takeoff → ARM_SEQUENCE → land
 ```
 
-Init: shoulder **0°**, elbow **90°**.
+Init before takeoff: shoulder **90°**, elbow **90°** (arm straight / extended).
 
 `arm_only:=true` skips arming / takeoff / land. Still needs MAVROS + GUIDED for `DO_SET_SERVO`.
 Use this for bench tests on hardware and for arm-only checks in sim.
@@ -254,7 +255,7 @@ ros2 run drone_control arm_mission --ros-args \
 
 | Step | Shoulder | Elbow |
 |------|----------|-------|
-| Init | 0° | 90° |
+| Init | 90° | 90° |
 | 1 | 90° | 90° |
 | 2a–b | 90° | 135° → 180° |
 | 3a–d | 135° → 180° → 135° → 90° | 90° → 90° → 90° → 45° |

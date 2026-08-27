@@ -50,7 +50,16 @@ Trajectory CSVs are written under `logs/trajectory_runs/`. Plot with `Tools/plot
 | `Tools/plot_data/` | Offline trajectory / joint plots |
 | `logs/` | Runtime mission CSVs (gitignored) |
 
-Submodules are listed in `.gitmodules`. Fresh checkouts can also use `ros2_gz.repos` (kept in sync with those branches).
+**UWB (not in this repo):** sibling [`../esp32-uwb-localization`](../esp32-uwb-localization) ([GitHub](https://github.com/NguyenAn20279/esp32-uwb-localization)) — HW+FW only; Tag→Pi UART `ODOM` contract in that repo’s `SPEC.md` §10.3 (ROS bridge later in `drone_control`).
+
+**Submodules (sim PC only):** Gazebo/SITL needs `ardupilot_gazebo`, `ardupilot_gz`, etc. (see `.gitmodules` / `ros2_gz.repos`). On a **companion Pi** you only need the main repo (`drone_control`, docs, firmware) — skip submodule init. On the **sim machine**, after every `git pull` / checkout:
+
+```bash
+git config --global submodule.recurse true   # once per machine (optional)
+git submodule update --init --recursive
+```
+
+Details: [docs/ROS2_Gazebo_ArduPilot_Setup.md](docs/ROS2_Gazebo_ArduPilot_Setup.md) §7.
 
 ## Documentation
 
