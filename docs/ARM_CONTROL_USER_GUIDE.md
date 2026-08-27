@@ -44,7 +44,7 @@ Set the same range on the flight controller (`SERVO9` / `SERVO10`):
 SERVO9_FUNCTION   0
 SERVO9_MIN        500
 SERVO9_MAX        2500
-SERVO9_TRIM       1167
+SERVO9_TRIM       500
 SERVO10_FUNCTION  0
 SERVO10_MIN       500
 SERVO10_MAX       2500
@@ -52,7 +52,7 @@ SERVO10_TRIM      1167
 ```
 
 SITL already has this in `gazebo-x500.parm`. On hardware, set the same params in Mission Planner / MAVProxy.
-Mission `INIT_ARM_POS` also commands both servos to **90°** before takeoff.
+Mission `INIT_ARM_POS` commands both servos to **90°** before takeoff (overrides TRIM).
 
 ---
 
@@ -132,7 +132,7 @@ PWM command still goes **Pixhawk AUX**, not the Pi. The Pi only runs ROS (MAVROS
 
 ### 4.1 FC params
 
-On the real Pixhawk, match §1 (`SERVO9/10` `FUNCTION=0`, `MIN=500`, `MAX=2500`, both `TRIM=1167` for 90° init).
+On the real Pixhawk, match §1 (`SERVO9/10` `FUNCTION=0`, `MIN=500`, `MAX=2500`, `SERVO9_TRIM=500`, `SERVO10_TRIM=1167`). Mission still moves both joints to **90°** before takeoff.
 PWM wires: shoulder → **AUX1 / SERVO9**, elbow → **AUX2 / SERVO10**. Common GND with the FC.
 
 ### 4.2 Terminal 1 — MAVROS
