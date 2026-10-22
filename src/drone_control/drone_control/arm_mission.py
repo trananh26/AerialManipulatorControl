@@ -118,8 +118,8 @@ class ArmMission(Node):
         self.elbow_traj = None
 
         # Init (canonical): shoulder 0°, elbow 90°
-        self.SHOULDER_INIT_PWM = self.PWM_MIN     # 500 = 0°
-        self.ELBOW_INIT_PWM = self.PWM_90         # 1167 = 90°
+        self.SHOULDER_INIT_PWM = self.PWM_90     # 500 = 0°
+        self.ELBOW_INIT_PWM = self.PWM_90          # 1167 = 90°
         self.INIT_ARM_DURATION = 3.0              # seconds to reach init position
         self.init_arm_start_time = None
 
@@ -376,7 +376,7 @@ class ArmMission(Node):
         # --- INIT_ARM_POS: move arm to init position before arming ---
         if s == self.INIT_ARM_POS:
             self.get_logger().info(
-                f'Moving arm to init: shoulder={self.pwm_to_rad(self.SHOULDER_INIT_PWM):.3f} rad (0°), '
+                f'Moving arm to init: shoulder={self.pwm_to_rad(self.SHOULDER_INIT_PWM):.3f} rad (90°), '
                 f'elbow={self.pwm_to_rad(self.ELBOW_INIT_PWM):.3f} rad (90°)'
             )
             self._logging_joints = True

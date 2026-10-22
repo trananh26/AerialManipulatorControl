@@ -10,7 +10,7 @@ Every new terminal:
 
 ```bash
 source /opt/ros/humble/setup.bash
-source ~/ros2_project/AerialManipulatorControl/install/setup.bash   # adjust path
+source ~/AerialManipulatorControl/install/setup.bash   # adjust path
 ```
 
 ---
