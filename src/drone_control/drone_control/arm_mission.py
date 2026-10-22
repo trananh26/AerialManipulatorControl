@@ -14,6 +14,11 @@ from .trajectory import SCurveTrajectory, MultiJointTrajectory
 from . import arm_pwm
 
 
+def _takeoff_target_z(current_z: float, takeoff_alt: float) -> float:
+    """Takeoff altitude is an absolute local Z target, not a delta from current Z."""
+    return float(takeoff_alt)
+
+
 class ArmMission(Node):
     """
     Mission: takeoff → control arm (shoulder + elbow) → land.
@@ -57,10 +62,10 @@ class ArmMission(Node):
         super().__init__('arm_mission')
 
         # ── Parameters ──
-        self.declare_parameter('takeoff_alt', 3.0)
+        self.declare_parameter('takeoff_alt', 2.0)
         self.declare_parameter('hover_time', 3.0)
-        self.declare_parameter('move_time_sec', 6.0)  # Time for each arm movement
-        self.declare_parameter('hold_time_sec', 3.0)   # Time to hold position after movement
+        self.declare_parameter('move_time_sec', 5.0)  # Time for each arm movement
+        self.declare_parameter('hold_time_sec', 2.0)   # Time to hold position after movement
         self.declare_parameter('max_acceleration', self.MAX_ACCELERATION)
         self.declare_parameter('jerk_limit', self.JERK_LIMIT)
         self.declare_parameter('save_log', True)
@@ -87,12 +92,11 @@ class ArmMission(Node):
         # Map: 0°→500, 90°→1167, 180°→1833, 270°→2500 (Sv9 shoulder, Sv10 elbow)
         # Each stored step: (shoulder_pwm, elbow_pwm, move_sec, hold_sec)
         arm_seq_deg = [
-            # Step 1: from init 0°/90° → 90°/90°
-            (90, 90),
             # Step 2: shoulder 90°, elbow up
             (90, 135),
             (90, 180),
             # Step 3: shoulder sweep, then elbow down
+            (135, 135),
             (135, 90),
             (180, 90),
             (135, 90),
@@ -104,6 +108,7 @@ class ArmMission(Node):
             # Step 6: home (shoulder 0°, elbow 90°)
             (0, 90),
         ]
+
         mt, ht = self.move_time_sec, self.hold_time_sec
         self.arm_sequence = [
             (self.deg_to_pwm(s), self.deg_to_pwm(e), mt, ht)
@@ -470,7 +475,7 @@ class ArmMission(Node):
             resp = self.pending_future.result()
             if resp and resp.success:
                 self.takeoff_z = self.current_z
-                self.target_z = self.takeoff_z + self.takeoff_alt
+                self.target_z = _takeoff_target_z(self.current_z, self.takeoff_alt)
                 self.takeoff_x = self.current_x  # Record takeoff position for planned path
                 self.takeoff_y = self.current_y
                 self.get_logger().info(f'Climbing to {self.target_z:.1f}m...')
