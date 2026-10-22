@@ -435,33 +435,64 @@ class ArmMission(Node):
         self.cmd_client.call_async(req)
 
     def _publish_altitude_setpoint(self, target_z: float):
-        """Publish a bounded vertical velocity command using ADRC for the UAV.
-        Keep a small non-zero hover command when the altitude error is small so the
-        controller does not command a zero-thrust stall while changing arm state.
+        """Publish the altitude-setpoint velocity.
+
+        Takeoff/climb is intentionally kept on a simple safe ramp to avoid the
+        aggressive ADRC behavior that can command a near-zero thrust and stall the
+        vehicle during liftoff. Once the drone has reached the target and is in the
+        arm-motion phases, the ADRC controller is re-enabled for finer altitude
+        regulation.
         """
         if self.current_z is None:
             return
 
-        dt = 0.05
-        arm_active = self.mission_state in (self.ARM_SEQUENCE, self.HOVER_BEFORE_ARM, self.HOVER_AFTER_ARM)
-        cmd_vz = self.altitude_controller.update(
-            reference=target_z,
-            measurement=self.current_z,
-            dt=dt,
-            arm_active=arm_active,
-        )
-
         error = target_z - self.current_z
-        if abs(error) < 0.12 and self.current_z < target_z:
-            cmd_vz = max(cmd_vz, self.adrc_min_hold_vz)
-        elif abs(error) < 0.12 and self.current_z >= target_z:
-            cmd_vz = min(cmd_vz, -self.adrc_min_hold_vz) if cmd_vz < 0 else 0.0
+        state = self.mission_state
+
+        if state in (self.WAIT_TAKEOFF, self.CLIMBING):
+            # Aggressive ADRC is disabled during takeoff/climb to prevent a near-zero
+            # lift command right after liftoff. Use a conservative monotonic climb rate.
+            if error > 1.0:
+                cmd_vz = 0.8
+            elif error > 0.5:
+                cmd_vz = 0.6
+            elif error > 0.15:
+                cmd_vz = 0.35
+            elif error > 0.0:
+                cmd_vz = 0.15
+            else:
+                cmd_vz = 0.0
+            cmd_vz = max(0.0, min(self.adrc_max_vel, cmd_vz))
+        else:
+            dt = 0.05
+            arm_active = state in (self.ARM_SEQUENCE, self.HOVER_BEFORE_ARM, self.HOVER_AFTER_ARM)
+            cmd_vz = self.altitude_controller.update(
+                reference=target_z,
+                measurement=self.current_z,
+                dt=dt,
+                arm_active=arm_active,
+            )
+
+            if state in (self.HOVER_BEFORE_ARM, self.HOVER_AFTER_ARM, self.ARM_SEQUENCE):
+                if error > 0.35:
+                    cmd_vz = max(cmd_vz, 0.45)
+                elif error > 0.10:
+                    cmd_vz = max(cmd_vz, 0.25)
+                elif error > 0.0:
+                    cmd_vz = max(cmd_vz, 0.12)
+                else:
+                    cmd_vz = min(cmd_vz, 0.0)
+
+            if abs(error) < 0.12 and self.current_z >= target_z:
+                cmd_vz = min(cmd_vz, 0.0)
 
         msg = TwistStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.twist.linear.x = 0.0
         msg.twist.linear.y = 0.0
-        msg.twist.linear.z = float(cmd_vz)
+        # ArduPilot/MAVROS velocity setpoints are in NED frame.
+        # A positive climb in local ENU corresponds to a negative z-velocity here.
+        msg.twist.linear.z = -float(cmd_vz)
         self.vel_pub.publish(msg)
 
     # ── Main state machine ──
@@ -592,6 +623,7 @@ class ArmMission(Node):
 
         # --- WAIT_TAKEOFF ---
         if s == self.WAIT_TAKEOFF:
+            self._publish_altitude_setpoint(self.takeoff_alt)
             if not self.pending_future.done():
                 return
             resp = self.pending_future.result()
@@ -614,7 +646,7 @@ class ArmMission(Node):
         # --- CLIMBING ---
         if s == self.CLIMBING:
             self._publish_altitude_setpoint(self.target_z)
-            if self.current_z >= self.target_z - 0.3:
+            if self.current_z >= self.target_z - 0.1:
                 self.get_logger().info('Altitude reached, hovering before arm control...')
                 self.add_planned(self.takeoff_x, self.takeoff_y, self.target_z,
                                  self.init_qx, self.init_qy, self.init_qz, self.init_qw)
