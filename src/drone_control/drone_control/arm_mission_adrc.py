@@ -19,6 +19,73 @@ def _takeoff_target_z(current_z: float, takeoff_alt: float) -> float:
     return float(takeoff_alt)
 
 
+class ADRCAltitudeController:
+    """A compact ADRC-style altitude controller for the UAV during state transitions
+    and while the manipulator arm is moving.
+
+    The controller uses a nonlinear PD-like law plus a disturbance estimate to
+    reject coupling effects caused by arm motion. The signal is clamped to a
+    safe velocity limit to avoid aggressive vertical motion.
+    """
+
+    @staticmethod
+    def _sign(value: float) -> float:
+        return 0.0 if abs(value) < 1e-9 else (1.0 if value > 0.0 else -1.0)
+
+    @staticmethod
+    def _fal(error: float, alpha: float, delta: float) -> float:
+        if abs(error) <= delta:
+            return error / (delta ** (1.0 - alpha))
+        return abs(error) ** alpha * ADRCAltitudeController._sign(error)
+
+    def __init__(
+        self,
+        kp: float = 1.3,
+        kd: float = 0.9,
+        observer_gain: float = 5.0,
+        max_cmd: float = 1.0,
+        arm_compensation: float = 0.35,
+        error_delta: float = 0.15,
+    ):
+        self.kp = kp
+        self.kd = kd
+        self.observer_gain = observer_gain
+        self.max_cmd = max_cmd
+        self.arm_compensation = arm_compensation
+        self.error_delta = error_delta
+        self.last_error = 0.0
+        self.last_update_ts = None
+        self.estimated_disturbance = 0.0
+
+    def reset(self):
+        self.last_error = 0.0
+        self.last_update_ts = None
+        self.estimated_disturbance = 0.0
+
+    def update(self, reference: float, measurement: float, dt: float, arm_active: bool = False) -> float:
+        dt = max(float(dt), 1e-3)
+        error = reference - measurement
+
+        if self.last_update_ts is None:
+            self.last_error = error
+
+        rate = (error - self.last_error) / dt
+        dist_est = self.observer_gain * self._fal(error, 0.5, self.error_delta)
+        ctrl = (
+            self.kp * self._fal(error, 0.5, self.error_delta) +
+            self.kd * self._fal(rate, 0.5, 0.25) +
+            dist_est
+        )
+
+        if arm_active:
+            ctrl += self.arm_compensation * self._sign(error)
+
+        self.last_error = error
+        self.estimated_disturbance = dist_est
+
+        return max(-self.max_cmd, min(self.max_cmd, ctrl))
+
+
 class ArmMission(Node):
     """
     Mission: takeoff → control arm (shoulder + elbow) → land.
@@ -71,6 +138,13 @@ class ArmMission(Node):
         self.declare_parameter('save_log', True)
         self.declare_parameter('arm_only', False)  # If True: skip takeoff/land, only run arm sequence
         self.declare_parameter('joint_states_topic', '/x500/joint_states')
+        self.declare_parameter('adrc_kp', 1.3)
+        self.declare_parameter('adrc_kd', 0.9)
+        self.declare_parameter('adrc_observer_gain', 5.0)
+        self.declare_parameter('adrc_max_vel', 1.0)
+        self.declare_parameter('adrc_arm_compensation', 0.35)
+        self.declare_parameter('adrc_error_delta', 0.15)
+        self.declare_parameter('adrc_min_hold_vz', 0.08)
 
         self.takeoff_alt = self.get_parameter('takeoff_alt').value
         self.hover_time = self.get_parameter('hover_time').value
@@ -81,11 +155,28 @@ class ArmMission(Node):
         self.save_log = self.get_parameter('save_log').value
         self.arm_only = self.get_parameter('arm_only').value
         self.joint_states_topic = self.get_parameter('joint_states_topic').value
+        self.adrc_kp = self.get_parameter('adrc_kp').value
+        self.adrc_kd = self.get_parameter('adrc_kd').value
+        self.adrc_observer_gain = self.get_parameter('adrc_observer_gain').value
+        self.adrc_max_vel = self.get_parameter('adrc_max_vel').value
+        self.adrc_arm_compensation = self.get_parameter('adrc_arm_compensation').value
+        self.adrc_error_delta = self.get_parameter('adrc_error_delta').value
+        self.adrc_min_hold_vz = self.get_parameter('adrc_min_hold_vz').value
+
+        self.altitude_controller = ADRCAltitudeController(
+            kp=self.adrc_kp,
+            kd=self.adrc_kd,
+            observer_gain=self.adrc_observer_gain,
+            max_cmd=self.adrc_max_vel,
+            arm_compensation=self.adrc_arm_compensation,
+            error_delta=self.adrc_error_delta,
+        )
 
         self.get_logger().info(
             f'Arm mission config: move_time={self.move_time_sec}s, '
             f'hold_time={self.hold_time_sec}s, '
-            f'accel={self.max_acceleration}, jerk={self.jerk_limit}'
+            f'accel={self.max_acceleration}, jerk={self.jerk_limit}, '
+            f'ADRC kp={self.adrc_kp}, kd={self.adrc_kd}, max_v={self.adrc_max_vel}'
         )
 
         # ── Arm sequence: write angles in degrees, convert to PWM ──
@@ -343,6 +434,36 @@ class ArmMission(Node):
         req.param2 = float(1000000 // rate)
         self.cmd_client.call_async(req)
 
+    def _publish_altitude_setpoint(self, target_z: float):
+        """Publish a bounded vertical velocity command using ADRC for the UAV.
+        Keep a small non-zero hover command when the altitude error is small so the
+        controller does not command a zero-thrust stall while changing arm state.
+        """
+        if self.current_z is None:
+            return
+
+        dt = 0.05
+        arm_active = self.mission_state in (self.ARM_SEQUENCE, self.HOVER_BEFORE_ARM, self.HOVER_AFTER_ARM)
+        cmd_vz = self.altitude_controller.update(
+            reference=target_z,
+            measurement=self.current_z,
+            dt=dt,
+            arm_active=arm_active,
+        )
+
+        error = target_z - self.current_z
+        if abs(error) < 0.12 and self.current_z < target_z:
+            cmd_vz = max(cmd_vz, self.adrc_min_hold_vz)
+        elif abs(error) < 0.12 and self.current_z >= target_z:
+            cmd_vz = min(cmd_vz, -self.adrc_min_hold_vz) if cmd_vz < 0 else 0.0
+
+        msg = TwistStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.twist.linear.x = 0.0
+        msg.twist.linear.y = 0.0
+        msg.twist.linear.z = float(cmd_vz)
+        self.vel_pub.publish(msg)
+
     # ── Main state machine ──
 
     def timer_cb(self):
@@ -457,6 +578,7 @@ class ArmMission(Node):
 
         # --- SEND_TAKEOFF ---
         if s == self.SEND_TAKEOFF:
+            self.altitude_controller.reset()
             req = CommandLong.Request()
             req.command = 22  # MAV_CMD_NAV_TAKEOFF
             req.param7 = self.takeoff_alt
@@ -491,6 +613,7 @@ class ArmMission(Node):
 
         # --- CLIMBING ---
         if s == self.CLIMBING:
+            self._publish_altitude_setpoint(self.target_z)
             if self.current_z >= self.target_z - 0.3:
                 self.get_logger().info('Altitude reached, hovering before arm control...')
                 self.add_planned(self.takeoff_x, self.takeoff_y, self.target_z,
@@ -501,6 +624,7 @@ class ArmMission(Node):
 
         # --- HOVER_BEFORE_ARM: stabilize before moving arm ---
         if s == self.HOVER_BEFORE_ARM:
+            self._publish_altitude_setpoint(self.target_z)
             if time.time() - self.hover_start >= self.hover_time:
                 self.get_logger().info('Starting arm sequence...')
                 self.arm_step = 0
@@ -510,6 +634,7 @@ class ArmMission(Node):
 
         # --- ARM_SEQUENCE: execute arm steps with smooth S-curve trajectories ---
         if s == self.ARM_SEQUENCE:
+            self._publish_altitude_setpoint(self.target_z)
             if self.arm_step >= len(self.arm_sequence):
                 self.get_logger().info('Arm sequence complete.')
                 self._logging_joints = False
@@ -600,6 +725,7 @@ class ArmMission(Node):
         # --- HOVER_AFTER_ARM: wait before landing ---
         if s == self.HOVER_AFTER_ARM:
             self._logging_joints = False
+            self._publish_altitude_setpoint(self.target_z)
             if time.time() - self.hover_start >= self.hover_time:
                 # One land target; stream timestamps in WAIT_LAND/WAIT_DISARM (not a burst)
                 self.add_planned(self.takeoff_x, self.takeoff_y, 0.2,

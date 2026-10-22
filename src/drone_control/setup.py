@@ -30,6 +30,7 @@ setup(
             'path_logger = drone_control.path_logger:main',
             'pid_ann_tuner = drone_control.pid_ann_tuner:main',
             'arm_mission_pid_ann = drone_control.arm_mission_pid_ann:main',
+            'arm_mission_adrc = drone_control.arm_mission_adrc:main',
             'arm_fb_bridge = drone_control.arm_fb_bridge:main',
         ],
     },
