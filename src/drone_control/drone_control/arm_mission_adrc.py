@@ -609,7 +609,6 @@ class ArmMission(Node):
 
         # --- SEND_TAKEOFF ---
         if s == self.SEND_TAKEOFF:
-            self.altitude_controller.reset()
             req = CommandLong.Request()
             req.command = 22  # MAV_CMD_NAV_TAKEOFF
             req.param7 = self.takeoff_alt
@@ -623,7 +622,6 @@ class ArmMission(Node):
 
         # --- WAIT_TAKEOFF ---
         if s == self.WAIT_TAKEOFF:
-            self._publish_altitude_setpoint(self.takeoff_alt)
             if not self.pending_future.done():
                 return
             resp = self.pending_future.result()
@@ -646,7 +644,7 @@ class ArmMission(Node):
         # --- CLIMBING ---
         if s == self.CLIMBING:
             self._publish_altitude_setpoint(self.target_z)
-            if self.current_z >= self.target_z - 0.1:
+            if self.current_z >= self.target_z - 0.3:
                 self.get_logger().info('Altitude reached, hovering before arm control...')
                 self.add_planned(self.takeoff_x, self.takeoff_y, self.target_z,
                                  self.init_qx, self.init_qy, self.init_qz, self.init_qw)
